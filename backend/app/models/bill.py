@@ -25,7 +25,14 @@ class Bill(db.Model):
     currency = db.Column(db.String(8), nullable=False, default="AUD")
     external_id = db.Column(db.String(255), nullable=True)
     note = db.Column(db.Text, nullable=True)
-    dedup_status = db.Column(db.String(32), nullable=False, default="unmatched")
+    # unmatched | suggested | linked | ignored
+    dedup_status = db.Column(
+        db.String(32), nullable=False, default="unmatched", index=True
+    )
+    # When this bill is the secondary of a linked pair, points at the primary.
+    dedup_primary_id = db.Column(
+        db.Integer, db.ForeignKey("bills.id"), nullable=True, index=True
+    )
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(
         db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -56,6 +63,7 @@ class Bill(db.Model):
             "external_id": self.external_id,
             "note": self.note,
             "dedup_status": self.dedup_status,
+            "dedup_primary_id": self.dedup_primary_id,
             "total_amount": str(self.total_amount),
             "created_at": self.created_at.isoformat() + "Z",
             "updated_at": self.updated_at.isoformat() + "Z",

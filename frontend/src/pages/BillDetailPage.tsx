@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, api } from "../api/client";
+import { CategoryIcon } from "../components/CategoryIcon";
 import { CategoryChip, CategoryPicker } from "../components/CategoryPicker";
 import { SourceLogo } from "../components/SourceLogo";
-import { formatEntryQty, formatMoney } from "../lib/format";
+import {
+  billLooksLikeIncome,
+  formatEntryQty,
+  formatMoneySigned,
+  formatOccurredAt,
+  isIncomeCategory,
+  moneyClass,
+} from "../lib/format";
 import type { Bill, CategoryItem, Entry, Vocabulary } from "../types";
 
 export function BillDetailPage() {
@@ -65,13 +73,19 @@ export function BillDetailPage() {
             </h1>
           </div>
           <p className="mt-2 text-ink-500">
-            {new Date(bill.occurred_at).toLocaleString()}
+            {formatOccurredAt(bill.occurred_at)}
           </p>
           {bill.note && <p className="mt-2 text-sm text-ink-400">{bill.note}</p>}
         </div>
         <div className="text-right">
-          <p className="font-display text-3xl text-ink-700">
-            {formatMoney(bill.total_amount, bill.currency)}
+          <p
+            className={`font-display text-3xl tabular-nums ${moneyClass(
+              billLooksLikeIncome(bill.entries),
+            )}`}
+          >
+            {formatMoneySigned(bill.total_amount, bill.currency, {
+              income: billLooksLikeIncome(bill.entries),
+            })}
           </p>
           {bill.source_type === "manual" && (
             <button
@@ -150,10 +164,16 @@ function EntryRow({
     : "未分类";
   const pending = entry.classification_status === "pending";
 
+  const income = isIncomeCategory(entry.category_id);
+
   return (
     <li className="py-5">
       <div className="flex items-start gap-3 sm:items-center sm:gap-5">
-        <ProductThumb src={entry.image_url} alt={entry.name} />
+        <ProductThumb
+          src={entry.image_url}
+          alt={entry.name}
+          categoryId={entry.category_id}
+        />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-ink-800">{entry.name}</p>
           <p className="mt-1 text-sm text-ink-400">{formatEntryQty(entry.quantity)}</p>
@@ -166,8 +186,8 @@ function EntryRow({
           {err && <p className="mt-1 text-sm text-red-700">{err}</p>}
         </div>
         <div className="shrink-0 text-right">
-          <p className="font-medium tabular-nums text-ink-800">
-            {formatMoney(entry.amount, currency)}
+          <p className={`font-medium tabular-nums ${moneyClass(income)}`}>
+            {formatMoneySigned(entry.amount, currency, { income })}
           </p>
           {onSpecial && (
             <span className="mt-1 inline-block rounded bg-[#FFE600] px-2 py-0.5 text-xs font-semibold text-ink-900">
@@ -189,14 +209,22 @@ function EntryRow({
   );
 }
 
-function ProductThumb({ src, alt }: { src?: string | null; alt: string }) {
+function ProductThumb({
+  src,
+  alt,
+  categoryId,
+}: {
+  src?: string | null;
+  alt: string;
+  categoryId?: string | null;
+}) {
   return (
     <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-ink-50 ring-1 ring-ink-100 sm:h-28 sm:w-28">
       {src ? (
         <img src={src} alt={alt} className="h-full w-full object-contain" loading="lazy" />
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-xs text-ink-300">
-          —
+        <div className="flex h-full w-full items-center justify-center text-ink-400">
+          <CategoryIcon id={categoryId} className="h-8 w-8 sm:h-10 sm:w-10" />
         </div>
       )}
     </div>

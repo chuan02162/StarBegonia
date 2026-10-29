@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { ApiError, api } from "../api/client";
 import { CategoryChip, CategoryPicker } from "../components/CategoryPicker";
 import { SourceLogo } from "../components/SourceLogo";
-import { formatMoney } from "../lib/format";
+import { formatMoney, formatOccurredAt } from "../lib/format";
 import type { CategoryItem, PendingEntry, Vocabulary } from "../types";
 
 export function CategoriesPage() {
@@ -57,7 +57,13 @@ export function CategoriesPage() {
         "/api/v1/categories/classify",
         {
           method: "POST",
-          body: JSON.stringify({ only_unclassified: true, limit: 40, async: true }),
+          body: JSON.stringify({
+            // Re-run current pending rows (name may have been fixed to merchant).
+            entry_ids: pending.map((e) => e.id),
+            only_unclassified: false,
+            limit: Math.max(pending.length, 40),
+            async: true,
+          }),
         },
       );
       if (res.job_id) {
@@ -150,7 +156,7 @@ function PendingRow({
                     {entry.bill.merchant || "账单"}
                   </Link>
                   {" · "}
-                  {new Date(entry.bill.occurred_at).toLocaleString()}
+                  {formatOccurredAt(entry.bill.occurred_at)}
                   {" · "}
                   {formatMoney(entry.amount, entry.bill.currency)}
                 </>

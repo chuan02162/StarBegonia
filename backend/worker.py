@@ -1,16 +1,25 @@
-"""RQ worker entrypoint. M0: process ready; M2: enqueue Coles sync jobs here."""
+"""RQ worker + optional Sydney-midnight sequential source sync scheduler."""
 
 from __future__ import annotations
+
+import logging
 
 from redis import Redis
 from rq import Worker
 
 from app import create_app
+from app.jobs.scheduler import start_daily_sync_scheduler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 
 def main() -> None:
     app = create_app()
     with app.app_context():
+        start_daily_sync_scheduler(app)
         conn = Redis.from_url(app.config["REDIS_URL"])
         worker = Worker(["default"], connection=conn)
         worker.work(with_scheduler=False)

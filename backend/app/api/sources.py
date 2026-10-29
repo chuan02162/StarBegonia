@@ -10,6 +10,7 @@ from app.jobs.coles_sync import run_coles_sync
 from app.jobs.commbank_sync import run_commbank_sync
 from app.services.sync import SyncError, sync_coles_source, sync_commbank_source
 from app.sources import list_sources
+from app.sources.commbank import CommBankError, list_commbank_accounts_for_ui
 
 bp = Blueprint("sources", __name__)
 
@@ -24,6 +25,46 @@ def get_sources():
     return jsonify({"sources": list_sources()})
 
 
+@bp.post("/commbank/verify-accounts")
+@login_required
+def verify_commbank_accounts():
+    """Check account numbers the user typed — does NOT list all workspace accounts."""
+    body = request.get_json(silent=True) or {}
+    numbers = body.get("account_numbers") or []
+    if isinstance(numbers, str):
+        numbers = [n.strip() for n in numbers.split(",") if n.strip()]
+    if not isinstance(numbers, list) or not numbers:
+        return jsonify({"error": "account_numbers required"}), 400
+    try:
+        data = list_commbank_accounts_for_ui()
+    except CommBankError as exc:
+        return jsonify({"error": exc.message}), exc.status_code or 400
+
+    def norm(v: object) -> str:
+        return "".join(ch for ch in str(v or "") if ch.isdigit())
+
+    wanted = {norm(n) for n in numbers if norm(n)}
+    matched = []
+    for a in data.get("accounts") or []:
+        num = norm(a.get("account_number"))
+        if num in wanted:
+            matched.append(
+                {
+                    "account_number": a.get("account_number"),
+                    "account_name": a.get("account_name"),
+                    "account_type": a.get("account_type"),
+                }
+            )
+            wanted.discard(num)
+    return jsonify(
+        {
+            "bank": data.get("bank"),
+            "matched": matched,
+            "unmatched": sorted(wanted),
+        }
+    )
+
+
 @bp.post("/coles/sync")
 @login_required
 def sync_coles():
@@ -36,6 +77,7 @@ def sync_coles():
             max_pages = int(max_pages)
         except (TypeError, ValueError):
             return jsonify({"error": "max_pages must be an integer"}), 400
+    full_sync = bool(body.get("full_sync"))
 
     async_mode = body.get("async", True)
     if async_mode:
@@ -47,6 +89,7 @@ def sync_coles():
                 run_coles_sync,
                 person_id,
                 max_pages,
+                full_sync,
                 job_timeout=600,
                 result_ttl=3600,
                 failure_ttl=3600,
@@ -56,7 +99,9 @@ def sync_coles():
             pass
 
     try:
-        result = sync_coles_source(person_id, max_pages=max_pages)
+        result = sync_coles_source(
+            person_id, max_pages=max_pages, full_sync=full_sync
+        )
     except SyncError as exc:
         return jsonify({"error": exc.message}), exc.status_code
     return jsonify(result)
@@ -76,6 +121,7 @@ def sync_commbank():
             return jsonify({"error": "lookback_days must be an integer"}), 400
     from_date = body.get("from")
     to_date = body.get("to")
+    full_sync = bool(body.get("full_sync"))
 
     async_mode = body.get("async", True)
     if async_mode:
@@ -89,6 +135,7 @@ def sync_commbank():
                 lookback_days,
                 from_date,
                 to_date,
+                full_sync,
                 job_timeout=600,
                 result_ttl=3600,
                 failure_ttl=3600,
@@ -103,6 +150,7 @@ def sync_commbank():
             lookback_days=lookback_days,
             from_date=from_date,
             to_date=to_date,
+            full_sync=full_sync,
         )
     except SyncError as exc:
         return jsonify({"error": exc.message}), exc.status_code

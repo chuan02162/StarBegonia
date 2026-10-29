@@ -16,13 +16,11 @@ export function SourceCredentialPage() {
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
 
-  // Coles
   const [refreshToken, setRefreshToken] = useState("");
-  // CommBank / BankSync
-  const [apiKey, setApiKey] = useState("");
-  const [bankId, setBankId] = useState("");
-  const [accountIds, setAccountIds] = useState("");
   const [lookbackDays, setLookbackDays] = useState("90");
+  /** One account number per line — never loads other people's full account list. */
+  const [accountNumbersText, setAccountNumbersText] = useState("");
+  const [verifyHint, setVerifyHint] = useState("");
 
   const supported = SUPPORTED.has(sourceType);
   const label = SOURCE_LABELS[sourceType] || sourceType;
@@ -42,22 +40,62 @@ export function SourceCredentialPage() {
     return <Navigate to="/account" replace />;
   }
 
+  function parseAccountNumbers(): string[] {
+    return accountNumbersText
+      .split(/[\n,]+/)
+      .map((s) => s.replace(/\D/g, ""))
+      .filter(Boolean);
+  }
+
+  async function verifyAccounts() {
+    setError("");
+    setVerifyHint("");
+    const nums = parseAccountNumbers();
+    if (!nums.length) {
+      setError("请先填写账户号");
+      return;
+    }
+    try {
+      const res = await api<{
+        matched: { account_number: string; account_name: string | null }[];
+        unmatched: string[];
+      }>("/api/v1/sources/commbank/verify-accounts", {
+        method: "POST",
+        body: JSON.stringify({ account_numbers: nums }),
+      });
+      const ok = (res.matched || [])
+        .map((m) => `${m.account_name || "账户"} · ${m.account_number}`)
+        .join("；");
+      const bad = (res.unmatched || []).join("、");
+      setVerifyHint(
+        [
+          ok ? `已匹配：${ok}` : "",
+          bad ? `未找到：${bad}` : "",
+        ]
+          .filter(Boolean)
+          .join("。") || "无结果",
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "校验失败");
+    }
+  }
+
   async function save(e: FormEvent) {
     e.preventDefault();
     if (!personId) return;
     setError("");
     setMessage("");
     try {
+      const nums = parseAccountNumbers();
+      if (sourceType === "commbank" && nums.length === 0) {
+        setError("请填写你自己的 CommBank 账户号（不会列出他人账户）");
+        return;
+      }
       const payload =
         sourceType === "coles"
           ? { refresh_token: refreshToken.trim() }
           : {
-              api_key: apiKey.trim() || undefined,
-              bank_id: bankId.trim() || undefined,
-              account_ids: accountIds
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean),
+              account_numbers: nums,
               lookback_days: Number(lookbackDays) || 90,
               skip_pending: true,
             };
@@ -66,7 +104,6 @@ export function SourceCredentialPage() {
         body: JSON.stringify({ label, payload }),
       });
       setRefreshToken("");
-      setApiKey("");
       setConfigured(true);
       setUpdatedAt(new Date().toISOString());
       setMessage("已保存");
@@ -82,6 +119,7 @@ export function SourceCredentialPage() {
     });
     setConfigured(false);
     setUpdatedAt(null);
+    setAccountNumbersText("");
     setMessage("已清除 credential");
   }
 
@@ -176,54 +214,29 @@ export function SourceCredentialPage() {
         ) : (
           <>
             <p className="text-sm text-ink-500">
-              通过{" "}
-              <a
-                href="https://banksync.io/docs"
-                target="_blank"
-                rel="noreferrer"
-                className="text-ink-700 underline"
-              >
-                BankSync
-              </a>{" "}
-              拉取 CommBank（CDR）。请先在 BankSync 连接 CommBank，并在服务器{" "}
-              <code className="text-xs">.env</code> 配置{" "}
-              <code className="text-xs">BANKSYNC_API_KEY</code>
-              （或在下方粘贴 key）。
+              项目共用 BankSync Key。请只填写<strong className="font-medium text-ink-700">你自己的</strong>
+              账户号（NetBank 里可见，如 11070639），每行一个。不会向你展示家庭其他成员的账户列表。
             </p>
             <label className="block">
-              <span className="mb-1.5 block text-sm text-ink-600">
-                API Key（可选，覆盖环境变量）
-              </span>
-              <input
-                className="field font-mono text-xs"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                autoComplete="off"
-                placeholder="bsk_…"
+              <span className="mb-1.5 block text-sm text-ink-600">账户号</span>
+              <textarea
+                className="field min-h-[5rem] font-mono text-sm"
+                value={accountNumbersText}
+                onChange={(e) => setAccountNumbersText(e.target.value)}
+                placeholder={"11070639\n28721148"}
+                required
               />
             </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-ink-600">
-                bank_id（可选，默认自动匹配 CommBank）
-              </span>
-              <input
-                className="field font-mono text-xs"
-                value={bankId}
-                onChange={(e) => setBankId(e.target.value)}
-                placeholder="bnk_…"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-ink-600">
-                account_ids（可选，逗号分隔；空=全部账户）
-              </span>
-              <input
-                className="field font-mono text-xs"
-                value={accountIds}
-                onChange={(e) => setAccountIds(e.target.value)}
-                placeholder="acc_…"
-              />
-            </label>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                className="btn-ghost text-sm"
+                onClick={verifyAccounts}
+              >
+                校验账户号
+              </button>
+            </div>
+            {verifyHint && <p className="text-sm text-ink-600">{verifyHint}</p>}
             <label className="block">
               <span className="mb-1.5 block text-sm text-ink-600">回溯天数</span>
               <input

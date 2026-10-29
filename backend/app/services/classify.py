@@ -8,6 +8,7 @@ from app.extensions import db
 from app.models import Bill, Entry
 from app.services.categories import get_vocabulary
 from app.services.jev import JevError, classify_entry_state
+from app.services.titles import best_title
 
 
 class ClassifyError(Exception):
@@ -37,9 +38,15 @@ def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
     categories = vocab.get("categories") or []
     bill = entry.bill
 
+    # BankSync often stored description="general" as entry.name; merchant
+    # holds the real title — send that to Jev or confidence stays junk.
+    label = best_title(entry.name, bill.merchant if bill else None)
+    if label != (entry.name or "").strip():
+        entry.name = label[:255]
+
     try:
         result = classify_entry_state(
-            name=entry.name,
+            name=label,
             amount=str(entry.amount),
             merchant=bill.merchant if bill else None,
             source_type=bill.source_type if bill else None,

@@ -15,7 +15,7 @@ def test_parse_order_detail():
                     "transactionBarcode": "12810260768117762100",
                     "orderPlacementTime": "2026-10-28T16:13:50+11:00",
                     "storeName": "Coles Epping",
-                    "orderAttributes": {"orderTotalPrice": 21.81},
+                    "orderAttributes": {"orderTotalPrice": 7.95},
                     "items": [
                         {
                             "id": 1,
@@ -58,6 +58,43 @@ def test_parse_order_detail():
     assert bill.entries[1].discount == Decimal("0.5")
     assert bill.entries[1].image_url is None
     assert adapter.external_id(bill) == bill.external_id
+
+
+def test_flybuys_adjustment_when_total_differs():
+    adapter = ColesAdapter()
+    raw = RawPayload(
+        data={
+            "orders": [
+                {
+                    "orderId": "7621",
+                    "orderStatus": "Completed",
+                    "transactionBarcode": "12810260768117762100",
+                    "orderPlacementTime": "2026-10-28T16:13:50+11:00",
+                    "storeName": "Coles Epping",
+                    "orderAttributes": {
+                        "orderTotalPrice": 21.81,
+                        "flybuysNumber": "600894******1010",
+                    },
+                    "items": [
+                        {
+                            "name": "Item A",
+                            "orderItem": {"quantity": 1, "itemTotalPrice": 20.00},
+                        },
+                        {
+                            "name": "Item B",
+                            "orderItem": {"quantity": 1, "itemTotalPrice": 12.81},
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+    bill = adapter.parse(raw)[0]
+    assert len(bill.entries) == 3
+    adj = bill.entries[-1]
+    assert adj.name == "Flybuys 优惠"
+    assert adj.amount == Decimal("-11.00")
+    assert sum(e.amount for e in bill.entries) == Decimal("21.81")
 
 
 def test_validate_credential():

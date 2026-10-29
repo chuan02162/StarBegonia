@@ -17,6 +17,8 @@ categories:
     label: 餐饮外卖
   - id: transport
     label: 交通出行
+  - id: rent
+    label: 房租
   - id: housing
     label: 住房物业
   - id: utilities
@@ -33,8 +35,14 @@ categories:
     label: 订阅会员
   - id: gifts
     label: 礼品红包
+  - id: salary
+    label: 工资收入
+  - id: interest
+    label: 利息收入
+  - id: income_other
+    label: 其他收入
   - id: income
-    label: 收入
+    label: 收入（未细分）
   - id: transfer
     label: 转账不计收支
   - id: other

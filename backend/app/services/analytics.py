@@ -15,7 +15,7 @@ from app.services.categories import get_vocabulary
 Granularity = Literal["week", "month", "quarter", "year"]
 
 # Categories treated as income (positive inflow); transfer excluded from expense/income totals
-INCOME_IDS = {"income"}
+INCOME_IDS = {"income", "salary", "interest", "income_other"}
 EXCLUDE_IDS = {"transfer"}
 
 
@@ -82,8 +82,10 @@ def overview(
     window_start = starts[0]
     current_start, current_end = _period_bounds(granularity)
 
+    visible_bills = household_service.visible_bills_query(viewer_person_id).all()
+    # Skip cross-source dedup secondaries (bank side of a confirmed link)
     visible_ids = [
-        b.id for b in household_service.visible_bills_query(viewer_person_id).all()
+        b.id for b in visible_bills if not b.dedup_primary_id
     ]
     if not visible_ids:
         rows = []

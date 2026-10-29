@@ -1,6 +1,18 @@
 from flask import Blueprint
 
-from app.api import analytics, auth, bills, categories, entries, households, people, sources
+from app.api import (
+    aa_rules,
+    analytics,
+    auth,
+    bills,
+    categories,
+    dedup,
+    entries,
+    households,
+    people,
+    settlements,
+    sources,
+)
 
 
 def register_blueprints(app) -> None:
@@ -13,4 +25,7 @@ def register_blueprints(app) -> None:
     api.register_blueprint(sources.bp, url_prefix="/sources")
     api.register_blueprint(analytics.bp, url_prefix="/analytics")
     api.register_blueprint(households.bp, url_prefix="/households")
+    api.register_blueprint(aa_rules.bp, url_prefix="/aa-rules")
+    api.register_blueprint(settlements.bp, url_prefix="/settlements")
+    api.register_blueprint(dedup.bp, url_prefix="/dedup")
     app.register_blueprint(api)

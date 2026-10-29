@@ -1,0 +1,110 @@
+# Google Cloud e2-micro (1 GiB) oriented stack.
+# Usage:
+#   docker compose -f docker-compose.free.yml --env-file .env up -d --build
+#
+# Prerequisites on the VM: 1–2 GiB swap, Docker, only port 80 open in firewall.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: starbegonia
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: starbegonia
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No host ports — only reachable on the compose network.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - max_connections=30
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U starbegonia"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 192m
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    mem_limit: 48m
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    command:
+      [
+        "gunicorn",
+        "-b",
+        "0.0.0.0:5000",
+        "-w",
+        "1",
+        "--threads",
+        "2",
+        "--timeout",
+        "120",
+        "wsgi:app",
+      ]
+    env_file: .env
+    environment:
+      STARBEGONIA_ENV: production
+      DATABASE_URL: postgresql+psycopg2://starbegonia:${POSTGRES_PASSWORD}@postgres:5432/starbegonia
+      REDIS_URL: redis://redis:6379/0
+      CATEGORIES_PATH: /config/categories.yaml
+      DAILY_SYNC_ENABLED: "0"
+    volumes:
+      - ./config:/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 220m
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    command: ["python", "worker.py"]
+    env_file: .env
+    environment:
+      STARBEGONIA_ENV: production
+      DATABASE_URL: postgresql+psycopg2://starbegonia:${POSTGRES_PASSWORD}@postgres:5432/starbegonia
+      REDIS_URL: redis://redis:6379/0
+      CATEGORIES_PATH: /config/categories.yaml
+      DAILY_SYNC_ENABLED: "1"
+      DAILY_SYNC_TZ: Australia/Sydney
+      DAILY_SYNC_HOUR: "0"
+      DAILY_SYNC_MINUTE: "0"
+      DAILY_SYNC_GAP_SECONDS: "60"
+    volumes:
+      - ./config:/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 220m
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    mem_limit: 32m
+    restart: unless-stopped
+
+volumes:
+  pgdata:

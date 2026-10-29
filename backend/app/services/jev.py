@@ -42,7 +42,10 @@ def classify_entry_state(
                 "Classify this household finance line item into exactly one category. "
                 "Prefer groceries for food staples from a supermarket; "
                 "household for cleaning and non-food essentials; "
-                "dining for restaurants/takeaway; other only when nothing else fits."
+                "dining for restaurants/takeaway; "
+                "rent for rent / bond / payments to a rental agency or landlord; "
+                "subscriptions for recurring digital services (music, streaming, cloud); "
+                "other only when nothing else fits."
             ),
             "criteria": criteria,
         }

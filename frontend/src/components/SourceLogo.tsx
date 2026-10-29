@@ -2,7 +2,7 @@ type Props = { source: string; className?: string };
 
 const LOGO_SRC: Record<string, string> = {
   coles: "/coles.png",
-  commbank: "/commbank.svg",
+  commbank: "/commbank.png",
 };
 
 export function SourceLogo({ source, className = "h-10 w-10" }: Props) {

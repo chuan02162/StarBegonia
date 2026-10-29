@@ -45,14 +45,30 @@ class ColesAdapter:
 
         start_page = int(cursor) if cursor and str(cursor).isdigit() else 1
         max_pages = int(cred.get("max_pages") or 0)  # 0 = all pages
+        # Coles BFF ignores date query params (probed); list is newest-first with
+        # orderPlacementTime — stop paging once we pass the watermark.
+        since_raw = cred.get("since")
+        since = _parse_dt(since_raw) if since_raw else None
+        incremental = bool(cred.get("incremental") and since)
+
         summaries: list[dict[str, Any]] = []
         page = start_page
+        listed = 0
+        hit_watermark = False
         while True:
             chunk = client.list_orders(page_number=page, page_size=PAGE_SIZE)
             orders = chunk.get("orders") or []
-            summaries.extend(orders)
+            if not orders:
+                break
+            for order in orders:
+                listed += 1
+                placed = _parse_dt(order.get("orderPlacementTime"))
+                if since and placed and placed < since:
+                    hit_watermark = True
+                    break
+                summaries.append(order)
             total = int(chunk.get("totalNoOfOrders") or 0)
-            if not orders or len(summaries) >= total:
+            if hit_watermark or listed >= total or len(orders) < PAGE_SIZE:
                 break
             page += 1
             if max_pages and (page - start_page + 1) > max_pages:
@@ -73,6 +89,10 @@ class ColesAdapter:
                 "orders": details,
                 "refresh_token": client.refresh_token,
                 "access_token": client.access_token,
+                "incremental": incremental,
+                "since": since.isoformat() if since else None,
+                "listed": listed,
+                "detailed": len(details),
             },
             cursor=str(page + 1) if summaries else None,
         )
@@ -267,15 +287,20 @@ def _parse_order(order: dict[str, Any]) -> BillDraft | None:
         if entry:
             entries.append(entry)
 
+    order_total = attrs.get("orderTotalPrice")
+    if order_total is None:
+        order_total = (summary.get("orderAttributes") or {}).get("orderTotalPrice")
+
     if not entries:
-        total = attrs.get("orderTotalPrice")
-        if total is None:
-            total = (summary.get("orderAttributes") or {}).get("orderTotalPrice")
-        if total is None:
+        if order_total is None:
             return None
         entries.append(
-            EntryDraft(name="Order total", amount=_dec(total), quantity=Decimal("1"))
+            EntryDraft(name="Order total", amount=_dec(order_total), quantity=Decimal("1"))
         )
+    elif order_total is not None:
+        # Line items are pre-tender; orderTotalPrice is what was actually paid
+        # (Flybuys dollars, vouchers, etc. may reduce the total).
+        _append_tender_adjustment(entries, paid=_dec(order_total), attrs=attrs)
 
     return BillDraft(
         occurred_at=occurred,
@@ -284,6 +309,41 @@ def _parse_order(order: dict[str, Any]) -> BillDraft | None:
         external_id=external_id,
         note="; ".join(note_parts) if note_parts else None,
         entries=entries,
+    )
+
+
+def _append_tender_adjustment(
+    entries: list[EntryDraft],
+    *,
+    paid: Decimal,
+    attrs: dict[str, Any],
+) -> None:
+    line_sum = sum((e.amount for e in entries), Decimal("0"))
+    diff = (line_sum - paid).quantize(Decimal("0.01"))
+    if abs(diff) < Decimal("0.01"):
+        return
+    # Prefer Flybuys label when card was presented or API names a redemption.
+    has_flybuys = bool(
+        attrs.get("flybuysNumber")
+        or attrs.get("flybuysRedemption")
+        or attrs.get("flybuysDollars")
+    )
+    if diff > 0:
+        name = "Flybuys 优惠" if has_flybuys else "结账优惠"
+        amount = -diff
+    else:
+        name = "结账调整"
+        amount = -diff  # paid more than lines → positive extra
+    entries.append(
+        EntryDraft(
+            name=name,
+            amount=amount,
+            quantity=Decimal("1"),
+            unit_price=amount,
+            currency="AUD",
+            category_id="other",
+            note=f"orderTotalPrice={paid}; lineSum={line_sum}",
+        )
     )
 
 

@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { SourceLogo } from "../components/SourceLogo";
-import { formatMoney } from "../lib/format";
+import {
+  billLooksLikeIncome,
+  formatMoneySigned,
+  formatOccurredAt,
+  moneyClass,
+} from "../lib/format";
 import type { Bill, CategoryItem, Vocabulary } from "../types";
 
 export function BillsPage() {
@@ -77,12 +82,18 @@ export function BillsPage() {
                   {b.merchant || "未命名商户"}
                 </p>
                 <p className="text-sm text-ink-400">
-                  {new Date(b.occurred_at).toLocaleString()}
+                  {formatOccurredAt(b.occurred_at)}
                   {b.entries?.length ? ` · ${b.entries.length} 项` : ""}
                 </p>
               </div>
-              <p className="shrink-0 font-medium tabular-nums text-ink-700">
-                {formatMoney(b.total_amount, b.currency)}
+              <p
+                className={`shrink-0 font-medium tabular-nums ${moneyClass(
+                  billLooksLikeIncome(b.entries),
+                )}`}
+              >
+                {formatMoneySigned(b.total_amount, b.currency, {
+                  income: billLooksLikeIncome(b.entries),
+                })}
               </p>
             </Link>
           </li>

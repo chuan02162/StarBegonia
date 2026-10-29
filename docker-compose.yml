@@ -51,6 +51,11 @@ services:
       DATABASE_URL: postgresql+psycopg2://starbegonia:starbegonia@postgres:5432/starbegonia
       REDIS_URL: redis://redis:6379/0
       CATEGORIES_PATH: /config/categories.yaml
+      # Sydney 00:00 sequential sync; set DAILY_SYNC_ENABLED=0 in .env to disable
+      DAILY_SYNC_TZ: Australia/Sydney
+      DAILY_SYNC_HOUR: "0"
+      DAILY_SYNC_MINUTE: "0"
+      DAILY_SYNC_GAP_SECONDS: "45"
     volumes:
       - ./config:/config:ro
     depends_on:

@@ -4,7 +4,13 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { SourceLogo } from "../components/SourceLogo";
-import { formatMoney } from "../lib/format";
+import {
+  billLooksLikeIncome,
+  formatMoney,
+  formatMoneySigned,
+  formatOccurredAt,
+  moneyClass,
+} from "../lib/format";
 import type { Bill } from "../types";
 
 type Granularity = "week" | "month" | "quarter" | "year";
@@ -101,7 +107,10 @@ export function OverviewPage() {
             </p>
             {income > 0 && (
               <p className="mt-3 text-sm text-ink-500">
-                收入 {formatMoney(income, currency)}
+                收入{" "}
+                <span className="font-medium text-emerald-700">
+                  +{formatMoney(income, currency)}
+                </span>
                 <span className="mx-2 text-ink-300">·</span>
                 结余 {formatMoney(income - expense, currency)}
               </p>
@@ -187,11 +196,17 @@ export function OverviewPage() {
                       {b.merchant || "未命名商户"}
                     </p>
                     <p className="text-sm text-ink-400">
-                      {new Date(b.occurred_at).toLocaleString()}
+                      {formatOccurredAt(b.occurred_at)}
                     </p>
                   </div>
-                  <p className="shrink-0 font-medium tabular-nums text-ink-700">
-                    {formatMoney(b.total_amount, b.currency || "AUD")}
+                  <p
+                    className={`shrink-0 font-medium tabular-nums ${moneyClass(
+                      billLooksLikeIncome(b.entries),
+                    )}`}
+                  >
+                    {formatMoneySigned(b.total_amount, b.currency || "AUD", {
+                      income: billLooksLikeIncome(b.entries),
+                    })}
                   </p>
                 </Link>
               </li>

@@ -2,15 +2,19 @@ import type { ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { Layout } from "./components/Layout";
+import { AaRulesPage } from "./pages/AaRulesPage";
 import { AccountPage } from "./pages/AccountPage";
 import { BillDetailPage } from "./pages/BillDetailPage";
 import { BillsPage } from "./pages/BillsPage";
 import { BootstrapPage } from "./pages/BootstrapPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
+import { DedupPage } from "./pages/DedupPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NewBillPage } from "./pages/NewBillPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { SettlementLinesPage } from "./pages/SettlementLinesPage";
+import { SettlementsPage } from "./pages/SettlementsPage";
 import { SourceCredentialPage } from "./pages/SourceCredentialPage";
 
 function Protected({ children }: { children: ReactNode }) {
@@ -44,6 +48,10 @@ export default function App() {
         <Route path="bills/new" element={<NewBillPage />} />
         <Route path="bills/:billId" element={<BillDetailPage />} />
         <Route path="categories" element={<CategoriesPage />} />
+        <Route path="aa" element={<AaRulesPage />} />
+        <Route path="settlements" element={<SettlementsPage />} />
+        <Route path="settlements/:settlementId/entries" element={<SettlementLinesPage />} />
+        <Route path="dedup" element={<DedupPage />} />
         <Route path="account" element={<AccountPage />} />
         <Route path="account/sources/:sourceType" element={<SourceCredentialPage />} />
         <Route path="people" element={<Navigate to="/account" replace />} />

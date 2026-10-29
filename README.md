@@ -66,3 +66,7 @@ Coles 实现：`backend/app/sources/coles.py`（BFF auth + orders + detail）。
 - CommBank：经 [BankSync](https://banksync.io/docs)（`X-API-Key` / `banks:read`）拉取流水，每笔为单条 `general` entry  
 
 `.env` 中配置 `JEV_API_KEY`、`BANKSYNC_API_KEY`（勿提交真实 key）。在 BankSync 先连接 CommBank，再在账户页启用同步。
+
+Worker 默认在 **Australia/Sydney 00:00** 串行增量同步所有已配置源（间隔见 `DAILY_SYNC_GAP_SECONDS`）。
+
+Google Cloud 免费层部署见 [`docs/deploy-gcp-free.md`](docs/deploy-gcp-free.md)（使用 `docker-compose.free.yml`）。

@@ -289,14 +289,19 @@ export function AccountPage() {
                   人
                 </p>
               </div>
-              <button
-                type="button"
-                className="btn-ghost text-sm"
-                disabled={busy}
-                onClick={leaveHousehold}
-              >
-                退出家庭
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <Link to="/dedup" className="btn-ghost text-sm">
+                  查看去重账单
+                </Link>
+                <button
+                  type="button"
+                  className="btn-ghost text-sm"
+                  disabled={busy}
+                  onClick={leaveHousehold}
+                >
+                  退出家庭
+                </button>
+              </div>
             </div>
 
             <ul className="divide-y divide-ink-100">
@@ -312,6 +317,21 @@ export function AccountPage() {
                 </li>
               ))}
             </ul>
+
+            <div className="flex flex-wrap gap-3 border-t border-ink-100 pt-4">
+              <Link
+                to="/aa"
+                className="rounded-md bg-ink-800 px-4 py-2 text-sm text-white hover:bg-ink-700"
+              >
+                AA 规则
+              </Link>
+              <Link
+                to="/settlements"
+                className="rounded-md border border-ink-300 px-4 py-2 text-sm text-ink-800 hover:bg-ink-50"
+              >
+                结算中心
+              </Link>
+            </div>
 
             {isOwner && (
               <div className="space-y-6 pt-2">
