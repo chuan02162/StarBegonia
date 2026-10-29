@@ -1,0 +1,41 @@
+# 分类词表（程序启动/调用时读取本文件；可直接改，改后按部署方式重载或重启生效）
+# id 供程序与 Jev 结构化输出使用；改 id 会影响已落库数据，慎改。label 可随时改展示名。
+
+# AA 比例未分满 100% 时，剩余份额归入此名义（如父母出资），不进入成员间再分摊
+aa_residual:
+  id: family_subsidy
+  label: 家庭补贴
+  description: 父母出资等不参与成员 AA 的剩余份额
+
+# Jev 分类候选（条目主分类，互斥选一）
+categories:
+  - id: groceries
+    label: 食材杂货
+  - id: household
+    label: 日用百货
+  - id: dining
+    label: 餐饮外卖
+  - id: transport
+    label: 交通出行
+  - id: housing
+    label: 住房物业
+  - id: utilities
+    label: 水电煤网
+  - id: health
+    label: 医疗健康
+  - id: education
+    label: 教育学习
+  - id: entertainment
+    label: 娱乐休闲
+  - id: clothing
+    label: 服饰鞋包
+  - id: subscriptions
+    label: 订阅会员
+  - id: gifts
+    label: 礼品红包
+  - id: income
+    label: 收入
+  - id: transfer
+    label: 转账不计收支
+  - id: other
+    label: 其他
