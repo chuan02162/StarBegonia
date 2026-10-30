@@ -11,7 +11,7 @@ type SourceInfo = {
   implemented: boolean;
 };
 
-const CONNECTABLE = ["coles", "commbank"];
+const CONNECTABLE = ["coles", "openfeed"];
 
 export function AccountPage() {
   const { user, refresh } = useAuth();

@@ -15,11 +15,11 @@ from app.services.classify import (
 from app.services.titles import is_generic_title
 from app.sources.base import BillDraft
 from app.sources.coles import ColesAdapter, ColesError
-from app.sources.commbank import CommBankAdapter, CommBankError
+from app.sources.openfeed import OpenFeedAdapter, OpenFeedError
 
 # Re-fetch a short overlap so pending→posted / Flybuys adjustments still land.
 _COLES_OVERLAP_DAYS = 2
-_COMMBANK_OVERLAP_DAYS = 3
+_OPENFEED_OVERLAP_DAYS = 3
 
 
 class SyncError(Exception):
@@ -137,7 +137,7 @@ def sync_coles_source(
     return result
 
 
-def sync_commbank_source(
+def sync_openfeed_source(
     person_id: int,
     *,
     lookback_days: int | None = None,
@@ -155,10 +155,10 @@ def sync_commbank_source(
         raise SyncError(exc.message, exc.status_code) from exc
 
     cred_row = SourceCredential.query.filter_by(
-        person_id=person_id, source_type="commbank"
+        person_id=person_id, source_type="openfeed"
     ).first()
     if not cred_row:
-        raise SyncError("commbank credential not configured for this person", 400)
+        raise SyncError("openfeed not connected — authorize in 账户 › OpenFeed", 400)
 
     try:
         payload = decrypt_payload(cred_row.payload_encrypted)
@@ -172,45 +172,54 @@ def sync_commbank_source(
     if to_date:
         payload = {**payload, "to": to_date}
 
-    # Explicit from/lookback forces a windowed (non-watermark) pull.
     force_full = full_sync or bool(from_date) or lookback_days is not None
     runtime = _runtime_credential(
         payload,
         person_id=person_id,
-        source_type="commbank",
+        source_type="openfeed",
         full_sync=force_full,
-        overlap_days=_COMMBANK_OVERLAP_DAYS,
+        overlap_days=_OPENFEED_OVERLAP_DAYS,
     )
 
-    adapter = CommBankAdapter()
+    adapter = OpenFeedAdapter()
     if not adapter.validate_credential(runtime):
         raise SyncError(
-            "invalid commbank credential: BANKSYNC_API_KEY or api_key required",
+            "invalid openfeed credential: reconnect via OpenFeed OAuth",
             400,
         )
 
     try:
         raw = adapter.fetch_raw(runtime)
         drafts = adapter.parse(raw)
-    except CommBankError as exc:
+    except OpenFeedError as exc:
         raise SyncError(exc.message, exc.status_code or 502) from exc
+
+    # Persist rotated refresh_token if OpenFeed issued a new one.
+    new_refresh = (raw.data or {}).get("refresh_token")
+    if new_refresh and new_refresh != payload.get("refresh_token"):
+        payload = {**payload, "refresh_token": new_refresh}
+        cred_row.payload_encrypted = encrypt_payload(payload)
 
     cred_row.last_validated_at = datetime.utcnow()
 
     result = _persist_drafts(
         person_id=person_id,
         household_id=household.id,
-        source_type="commbank",
+        source_type="openfeed",
         adapter=adapter,
         drafts=drafts,
         backfill_images=False,
     )
-    result["bank_id"] = (raw.data or {}).get("bank", {}).get("id")
     result["accounts"] = len((raw.data or {}).get("accounts") or [])
     result["from"] = (raw.data or {}).get("from")
     result["to"] = (raw.data or {}).get("to")
     result["incremental"] = bool((raw.data or {}).get("incremental"))
     return result
+
+
+# Back-compat alias for any leftover imports
+def sync_commbank_source(*args, **kwargs):
+    return sync_openfeed_source(*args, **kwargs)
 
 
 def _persist_drafts(

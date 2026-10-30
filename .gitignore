@@ -11,3 +11,7 @@ dist/
 .coverage
 htmlcov/
 pgdata/
+
+# OpenFeed / local secrets
+backend/secrets/
+*.pem

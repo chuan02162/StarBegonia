@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-SYNCABLE = ("coles", "commbank")
+SYNCABLE = ("coles", "openfeed")
 
 
 def seconds_until_local_time(
@@ -34,9 +34,9 @@ def seconds_until_local_time(
 
 
 def run_daily_sync_all(*, gap_seconds: float = 45.0) -> dict[str, Any]:
-    """Sync every coles/commbank credential one-by-one (never concurrent)."""
+    """Sync every coles/openfeed credential one-by-one (never concurrent)."""
     from app.models import SourceCredential
-    from app.services.sync import SyncError, sync_coles_source, sync_commbank_source
+    from app.services.sync import SyncError, sync_coles_source, sync_openfeed_source
 
     rows = (
         SourceCredential.query.filter(SourceCredential.source_type.in_(SYNCABLE))
@@ -58,8 +58,8 @@ def run_daily_sync_all(*, gap_seconds: float = 45.0) -> dict[str, Any]:
         try:
             if cred.source_type == "coles":
                 outcome = sync_coles_source(cred.person_id)
-            elif cred.source_type == "commbank":
-                outcome = sync_commbank_source(cred.person_id)
+            elif cred.source_type == "openfeed":
+                outcome = sync_openfeed_source(cred.person_id)
             else:
                 continue
             item["ok"] = True

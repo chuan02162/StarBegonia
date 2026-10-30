@@ -112,7 +112,7 @@ export function BillsPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {["", "manual", "coles", "commbank"].map((s) => (
+        {["", "manual", "coles", "openfeed", "commbank"].map((s) => (
           <button
             key={s || "all"}
             type="button"

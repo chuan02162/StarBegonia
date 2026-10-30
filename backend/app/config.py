@@ -46,11 +46,19 @@ class Config:
     # Below this confidence → classification_status = pending
     JEV_CONFIDENCE_THRESHOLD = float(os.environ.get("JEV_CONFIDENCE_THRESHOLD", "0.7"))
 
-    # BankSync (CommBank CDR) — Workspace › Developers › API key (banks:read)
-    BANKSYNC_API_KEY = os.environ.get("BANKSYNC_API_KEY", "")
-    BANKSYNC_API_URL = os.environ.get(
-        "BANKSYNC_API_URL", "https://api.banksync.io"
+    # Public site origin (OAuth redirect + jwksUri base), e.g. http://1cchome1.duckdns.org:5173
+    APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")
+
+    # OpenFeed (CDR Sharing API) — replaces BankSync
+    OPENFEED_ISSUER = os.environ.get("OPENFEED_ISSUER", "https://auth.openfeed.au").rstrip(
+        "/"
     )
+    OPENFEED_CLIENT_ID = os.environ.get("OPENFEED_CLIENT_ID", "")  # oauth2ClientId (app-…)
+    OPENFEED_APP_ID = os.environ.get("OPENFEED_APP_ID", "")  # bare UUID for consent deep-link
+    OPENFEED_APP_PRIVATE_KEY = os.environ.get("OPENFEED_APP_PRIVATE_KEY", "")
+    OPENFEED_DPOP_PRIVATE_KEY = os.environ.get("OPENFEED_DPOP_PRIVATE_KEY", "")
+    OPENFEED_APP_KID = os.environ.get("OPENFEED_APP_KID", "")
+    OPENFEED_DPOP_KID = os.environ.get("OPENFEED_DPOP_KID", "")
 
     # Nightly sync (worker process). Sydney wall clock by default.
     DAILY_SYNC_ENABLED = os.environ.get("DAILY_SYNC_ENABLED", "1") == "1"

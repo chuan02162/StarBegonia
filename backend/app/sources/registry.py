@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from app.sources.base import SourceAdapter
 from app.sources.coles import ColesAdapter
-from app.sources.commbank import CommBankAdapter
 from app.sources.manual import ManualAdapter
+from app.sources.openfeed import OpenFeedAdapter
 
 _ADAPTERS: dict[str, SourceAdapter] = {
     ManualAdapter.source_type: ManualAdapter(),
     ColesAdapter.source_type: ColesAdapter(),
-    CommBankAdapter.source_type: CommBankAdapter(),
+    OpenFeedAdapter.source_type: OpenFeedAdapter(),
 }
 
 
