@@ -29,6 +29,7 @@ export function AccountPage() {
   const [person, setPerson] = useState<Person | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [jevMsg, setJevMsg] = useState("");
 
   const loadHousehold = useCallback(async () => {
     const data = await api<{
@@ -111,6 +112,46 @@ export function AccountPage() {
       await loadHousehold();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "退出失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runFullJev() {
+    if (
+      !confirm(
+        "将对家庭可见的全部条目重新跑 Jev（覆盖现有自动分类），并清理已删除的分类。确定？",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setJevMsg("排队全量 Jev…");
+    try {
+      const res = await api<{
+        job_id?: string;
+        status?: string;
+        classified?: number;
+        requested?: number;
+      }>("/api/v1/categories/classify", {
+        method: "POST",
+        body: JSON.stringify({
+          full: true,
+          scope: "household",
+          only_unclassified: false,
+          limit: 5000,
+          async: true,
+        }),
+      });
+      if (res.job_id) {
+        setJevMsg(`已排队 job ${res.job_id}，后台跑完后分类会更新`);
+      } else {
+        setJevMsg(`已分类 ${res.classified ?? 0}/${res.requested ?? 0} 条`);
+      }
+    } catch (err) {
+      setJevMsg("");
+      setError(err instanceof ApiError ? err.message : "全量 Jev 失败");
     } finally {
       setBusy(false);
     }
@@ -300,12 +341,21 @@ export function AccountPage() {
                   type="button"
                   className="btn-ghost text-sm"
                   disabled={busy}
+                  onClick={runFullJev}
+                >
+                  全量跑 Jev
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-sm"
+                  disabled={busy}
                   onClick={leaveHousehold}
                 >
                   退出家庭
                 </button>
               </div>
             </div>
+            {jevMsg && <p className="text-sm text-ink-500">{jevMsg}</p>}
 
             <ul className="divide-y divide-ink-100">
               {(household.members || []).map((m) => (

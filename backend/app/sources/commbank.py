@@ -223,51 +223,6 @@ def list_commbank_accounts_for_ui() -> dict[str, Any]:
     }
 
 
-# BankSync category / type → our vocabulary (None = leave unclassified for Jev/UI)
-_BANKSYNC_CATEGORY_MAP = {
-    "INCOME": "salary",
-    "TRANSFER_IN": "income_other",
-    "TRANSFER_OUT": "transfer",
-    "RENT_AND_UTILITIES": "rent",
-    "FOOD_AND_DRINK": "dining",
-    "MEDICAL": "health",
-    "TRANSPORT": "transport",
-    "TRAVEL": "transport",
-    "GENERAL_MERCHANDISE": "household",
-    "PERSONAL_CARE": "household",
-    "ENTERTAINMENT": "entertainment",
-    "GENERAL_SERVICES": "other",
-    "BANK_FEES": "other",
-    "TAX": "other",
-}
-
-
-def _map_category(txn: dict[str, Any], *, is_income: bool) -> str | None:
-    txn_type = str(txn.get("type") or "").upper()
-    bs_cat = str(txn.get("category") or "").upper()
-    desc = (
-        f"{txn.get('description') or ''} {txn.get('merchantName') or ''}"
-    ).lower()
-
-    if txn_type == "INTEREST_PAID" or "interest" in desc:
-        return "interest"
-    if txn_type == "TRANSFER_INCOMING":
-        return "salary" if is_income else "transfer"
-    # Prefer BankSync category before transfer type — rent paid via
-    # CommBank App is often TRANSFER_OUTGOING + RENT_AND_UTILITIES.
-    if bs_cat in _BANKSYNC_CATEGORY_MAP:
-        mapped = _BANKSYNC_CATEGORY_MAP[bs_cat]
-        if mapped == "salary" and not is_income:
-            return None
-        return mapped
-    if txn_type == "TRANSFER_OUTGOING":
-        return "transfer"
-    if is_income:
-        return "income_other"
-    # Unclear expense — leave empty for manual/Jev; title stays on the entry
-    return None
-
-
 def _txn_to_draft(txn: dict[str, Any]) -> BillDraft | None:
     txn_id = str(txn.get("id") or "").strip()
     if not txn_id:
@@ -282,7 +237,6 @@ def _txn_to_draft(txn: dict[str, Any]) -> BillDraft | None:
         return None
 
     abs_amount = abs(signed)
-    is_income = signed > 0
 
     # BankSync exposes CDR postingDateTime as providerPostingDateTime (RFC3339).
     # `date` / `authorizedDate` are date-only fallbacks.
@@ -321,15 +275,15 @@ def _txn_to_draft(txn: dict[str, Any]) -> BillDraft | None:
     if txn.get("reference"):
         note_parts.append(f"ref={txn.get('reference')}")
 
-    category_id = _map_category(txn, is_income=is_income)
-
+    # Category left empty — Jev (or manual) classifies; BankSync labels
+    # stay in note as banksync_category=… for debugging only.
     entry = EntryDraft(
         name=title[:255],
         amount=abs_amount,
         quantity=Decimal("1"),
         unit_price=abs_amount,
         currency=currency,
-        category_id=category_id,
+        category_id=None,
         note=None,
     )
 

@@ -60,12 +60,26 @@ def pending_entries():
 @bp.post("/classify")
 @login_required
 def classify_batch():
-    """Classify unclassified (or given) entries via Jev. Async by default."""
+    """Classify unclassified (or given) entries via Jev. Async by default.
+
+    Body flags:
+      - only_unclassified (default true)
+      - scope=household + full=true → scrub stale cats, force-Jev all visible,
+        then rescan internal transfers
+    """
     body = request.get_json(silent=True) or {}
     entry_ids = body.get("entry_ids")
     limit = int(body.get("limit") or 50)
     only_unclassified = bool(body.get("only_unclassified", True))
     async_mode = body.get("async", True)
+    scope = (body.get("scope") or "").strip().lower()
+    full = bool(body.get("full", False))
+    person = current_person()
+    viewer_person_id = person.id if scope == "household" or full else None
+    if full:
+        only_unclassified = False
+        limit = max(limit, 5000)
+        viewer_person_id = person.id
 
     if async_mode:
         try:
@@ -77,7 +91,9 @@ def classify_batch():
                 entry_ids,
                 only_unclassified,
                 limit,
-                job_timeout=1800,
+                viewer_person_id,
+                full,
+                job_timeout=3600,
                 result_ttl=3600,
                 failure_ttl=3600,
             )
@@ -86,11 +102,15 @@ def classify_batch():
             pass
 
     try:
-        result = classify_service.classify_entries(
-            entry_ids,
-            only_unclassified=only_unclassified,
-            limit=limit,
-        )
+        if full:
+            result = classify_service.reclassify_household(person.id, limit=limit)
+        else:
+            result = classify_service.classify_entries(
+                entry_ids,
+                only_unclassified=only_unclassified,
+                limit=limit,
+                viewer_person_id=viewer_person_id,
+            )
     except classify_service.ClassifyError as exc:
         return jsonify({"error": exc.message}), exc.status_code
     return jsonify(result)

@@ -60,9 +60,10 @@ export function formatOccurredAt(iso: string | null | undefined): string {
 
 /** Income category ids — keep in sync with config/categories.yaml + analytics.INCOME_IDS */
 export const INCOME_CATEGORY_IDS = new Set([
-  "income",
   "salary",
   "interest",
+  // Legacy ids until rows are reclassified
+  "income",
   "income_other",
 ]);
 

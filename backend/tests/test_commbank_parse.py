@@ -60,7 +60,7 @@ def test_parse_bank_transactions():
     income = drafts[1]
     assert income.entries[0].name == "Salary"
     assert income.entries[0].amount == Decimal("3200.0")
-    assert income.entries[0].category_id == "salary"
+    assert income.entries[0].category_id is None
 
     assert adapter.external_id(expense) == "banksync:txn_1"
 
@@ -99,7 +99,8 @@ def test_title_prefers_merchant_over_generic_description():
     )
     draft = adapter.parse(raw)[0]
     assert draft.entries[0].name.startswith("Transfer To Hopefluent")
-    assert draft.entries[0].category_id == "rent"
+    assert draft.entries[0].category_id is None
+    assert "banksync_category=RENT_AND_UTILITIES" in (draft.note or "")
 
 
 def test_prefers_provider_posting_datetime():

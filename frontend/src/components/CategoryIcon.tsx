@@ -77,20 +77,16 @@ export function CategoryIcon({ id, className }: Props) {
         </Svg>
       );
     case "rent":
+      // Apartment / lease — not a key (old paths looked like ♂)
       return (
         <Svg className={className}>
-          <circle cx="8" cy="15" r="4" />
-          <path d="M10.7 12.3 19 4" />
-          <path d="M15 4h4v4" />
-          <path d="M18 7v3" />
-        </Svg>
-      );
-    case "housing":
-      return (
-        <Svg className={className}>
-          <path d="M2 20h20" />
-          <path d="M5 20V8l7-5 7 5v12" />
-          <path d="M9 20v-6h6v6" />
+          <path d="M3 21h18" />
+          <path d="M5 21V8l7-5 7 5v13" />
+          <path d="M9 21v-6h6v6" />
+          <path d="M9 10h.01" />
+          <path d="M15 10h.01" />
+          <path d="M9 14h.01" />
+          <path d="M15 14h.01" />
         </Svg>
       );
     case "utilities":
@@ -113,34 +109,11 @@ export function CategoryIcon({ id, className }: Props) {
           <path d="M22 10v6" />
         </Svg>
       );
-    case "entertainment":
-      return (
-        <Svg className={className}>
-          <path d="m9 18 6-12" />
-          <circle cx="6" cy="18" r="3" />
-          <circle cx="18" cy="6" r="3" />
-        </Svg>
-      );
-    case "clothing":
-      return (
-        <Svg className={className}>
-          <path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.46a1 1 0 0 0 .99.85H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.85l.58-3.46a2 2 0 0 0-1.34-2.23Z" />
-        </Svg>
-      );
     case "subscriptions":
       return (
         <Svg className={className}>
           <rect x="2" y="5" width="20" height="14" rx="2" />
           <path d="M2 10h20" />
-        </Svg>
-      );
-    case "gifts":
-      return (
-        <Svg className={className}>
-          <rect x="3" y="8" width="18" height="4" rx="1" />
-          <path d="M12 8v13" />
-          <path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" />
-          <path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5" />
         </Svg>
       );
     case "salary":
@@ -164,14 +137,6 @@ export function CategoryIcon({ id, className }: Props) {
           <path d="M18 12h4" />
           <path d="m19.1 4.9-2.8 2.8" />
           <circle cx="12" cy="12" r="3" />
-        </Svg>
-      );
-    case "income":
-    case "income_other":
-      return (
-        <Svg className={className}>
-          <path d="M12 2v20" />
-          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
         </Svg>
       );
     case "transfer":

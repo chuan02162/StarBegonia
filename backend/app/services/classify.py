@@ -22,6 +22,8 @@ STATUS_UNCLASSIFIED = "unclassified"
 STATUS_PENDING = "pending"
 STATUS_CONFIRMED = "confirmed"
 
+_MAX_BATCH = 5000
+
 
 def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
     entry = db.session.get(Entry, entry_id)
@@ -76,19 +78,63 @@ def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
     return entry
 
 
+def scrub_stale_categories() -> dict[str, int]:
+    """Drop removed vocab ids from entries and AA rules."""
+    from app.models import AaRule
+
+    vocab = get_vocabulary()
+    valid = {c["id"] for c in (vocab.get("categories") or []) if c.get("id")}
+    cleared = 0
+    for entry in Entry.query.filter(Entry.category_id.isnot(None)).all():
+        if entry.category_id not in valid:
+            entry.category_id = None
+            entry.classification_status = STATUS_UNCLASSIFIED
+            entry.category_confidence = None
+            cleared += 1
+
+    rules_fixed = 0
+    for rule in AaRule.query.all():
+        cats = list(rule.category_ids or [])
+        kept = [c for c in cats if c in valid]
+        if kept != cats:
+            rule.category_ids = kept
+            rules_fixed += 1
+
+    if cleared or rules_fixed:
+        db.session.commit()
+    return {"entries_cleared": cleared, "aa_rules_fixed": rules_fixed}
+
+
 def classify_entries(
     entry_ids: list[int] | None = None,
     *,
     only_unclassified: bool = True,
     limit: int = 50,
+    viewer_person_id: int | None = None,
 ) -> dict[str, Any]:
     q = Entry.query
     if entry_ids is not None:
         q = q.filter(Entry.id.in_(entry_ids))
+    elif viewer_person_id is not None:
+        from app.services import households as household_service
+
+        visible_ids = [
+            b.id for b in household_service.visible_bills_query(viewer_person_id).all()
+        ]
+        if not visible_ids:
+            return {
+                "requested": 0,
+                "classified": 0,
+                "pending_after": 0,
+                "failed": [],
+            }
+        q = q.filter(Entry.bill_id.in_(visible_ids))
+        if only_unclassified:
+            q = q.filter(Entry.classification_status == STATUS_UNCLASSIFIED)
     elif only_unclassified:
         q = q.filter(Entry.classification_status == STATUS_UNCLASSIFIED)
 
-    entries = q.order_by(Entry.id.asc()).limit(min(limit, 200)).all()
+    entries = q.order_by(Entry.id.asc()).limit(min(max(limit, 1), _MAX_BATCH)).all()
     classified = 0
     pending = 0
     failed: list[dict[str, Any]] = []
@@ -109,6 +155,36 @@ def classify_entries(
         "classified": classified,
         "pending_after": pending,
         "failed": failed,
+    }
+
+
+def reclassify_household(
+    person_id: int,
+    *,
+    limit: int = _MAX_BATCH,
+) -> dict[str, Any]:
+    """Scrub removed categories, force-Jev all visible entries, rescan transfers."""
+    scrub = scrub_stale_categories()
+    result = classify_entries(
+        None,
+        only_unclassified=False,
+        limit=limit,
+        viewer_person_id=person_id,
+    )
+    transfer_scan = None
+    try:
+        from app.services import households as household_service
+        from app.services import internal_transfers as transfer_service
+
+        hh = household_service.require_active_household(person_id)
+        transfer_scan = transfer_service.scan_household(hh.id)
+    except Exception as exc:
+        transfer_scan = {"error": str(exc)}
+
+    return {
+        **result,
+        "scrub": scrub,
+        "transfer_scan": transfer_scan,
     }
 
 

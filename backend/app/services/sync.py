@@ -329,7 +329,7 @@ def _enqueue_classify(entry_ids: list[int]) -> str | None:
 def _refresh_existing_bill(
     bill: Bill, draft: BillDraft
 ) -> tuple[bool, list[int]]:
-    """Fix generic titles / apply BankSync category on re-sync.
+    """Fix generic titles / queue unclassified rows for Jev on re-sync.
 
     Returns (changed, entry_ids_needing_classify).
     """

@@ -44,7 +44,10 @@ def classify_entry_state(
                 "household for cleaning and non-food essentials; "
                 "dining for restaurants/takeaway; "
                 "rent for rent / bond / payments to a rental agency or landlord; "
+                "utilities for electricity, gas, water, internet; "
                 "subscriptions for recurring digital services (music, streaming, cloud); "
+                "salary only for employment payroll; "
+                "transfer for person-to-person or account transfers that are not spend; "
                 "other only when nothing else fits."
             ),
             "criteria": criteria,

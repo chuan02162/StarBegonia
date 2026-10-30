@@ -15,7 +15,8 @@ from app.services.categories import get_vocabulary
 Granularity = Literal["week", "month", "quarter", "year"]
 
 # Categories treated as income (positive inflow); transfer excluded from expense/income totals
-INCOME_IDS = {"income", "salary", "interest", "income_other"}
+# Include legacy ids still present on old rows until full Jev reclassify.
+INCOME_IDS = {"salary", "interest", "income", "income_other"}
 EXCLUDE_IDS = {"transfer"}
 
 
