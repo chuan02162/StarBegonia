@@ -41,6 +41,30 @@ def get_household_for_person(person_id: int) -> dict[str, Any] | None:
     return data
 
 
+def update_household(
+    *, person_id: int, name: str | None = None, jev_context: Any = ...
+) -> Household:
+    """Active member can edit shared Jev context; owner can rename."""
+    m = active_membership(person_id)
+    if not m:
+        raise HouseholdError("当前不在家庭中", 400)
+    hh = m.household
+    if name is not None:
+        if m.role != "owner" and hh.owner_person_id != person_id:
+            raise HouseholdError("只有创建者可以改家庭名称", 403)
+        name = name.strip()
+        if not name:
+            raise HouseholdError("家庭名称不能为空")
+        hh.name = name
+    if jev_context is not ...:
+        text = (jev_context or "").strip() if jev_context is not None else ""
+        if len(text) > 4000:
+            raise HouseholdError("Jev 提示词最长 4000 字")
+        hh.jev_context = text or None
+    db.session.commit()
+    return hh
+
+
 def create_household(*, person_id: int, name: str) -> Household:
     if active_membership(person_id):
         raise HouseholdError("已在家庭中，请先退出再创建新家庭", 409)

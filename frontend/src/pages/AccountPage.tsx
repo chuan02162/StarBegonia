@@ -30,6 +30,9 @@ export function AccountPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [jevMsg, setJevMsg] = useState("");
+  const [jevContext, setJevContext] = useState("");
+  const [jevContextMsg, setJevContextMsg] = useState("");
+  const [showJevContext, setShowJevContext] = useState(false);
 
   const loadHousehold = useCallback(async () => {
     const data = await api<{
@@ -37,6 +40,7 @@ export function AccountPage() {
       pending_invites: Invite[];
     }>("/api/v1/households/me");
     setHousehold(data.household);
+    setJevContext(data.household?.jev_context || "");
     setPendingInvites(data.pending_invites || []);
     if (data.household?.my_role === "owner") {
       const inv = await api<{ invites: Invite[] }>("/api/v1/households/invites");
@@ -112,6 +116,26 @@ export function AccountPage() {
       await loadHousehold();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "退出失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveJevContext(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    setJevContextMsg("");
+    try {
+      const data = await api<{ household: Household }>("/api/v1/households/me", {
+        method: "PATCH",
+        body: JSON.stringify({ jev_context: jevContext }),
+      });
+      setHousehold(data.household);
+      setJevContext(data.household.jev_context || "");
+      setJevContextMsg("已保存 Jev 提示词");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "保存失败");
     } finally {
       setBusy(false);
     }
@@ -341,6 +365,14 @@ export function AccountPage() {
                   type="button"
                   className="btn-ghost text-sm"
                   disabled={busy}
+                  onClick={() => setShowJevContext((v) => !v)}
+                >
+                  编辑 Jev 提示词
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost text-sm"
+                  disabled={busy}
                   onClick={runFullJev}
                 >
                   全量跑 Jev
@@ -356,6 +388,34 @@ export function AccountPage() {
               </div>
             </div>
             {jevMsg && <p className="text-sm text-ink-500">{jevMsg}</p>}
+
+            {showJevContext && (
+              <form
+                onSubmit={saveJevContext}
+                className="space-y-3 rounded-lg bg-ink-50/80 p-4 ring-1 ring-ink-100"
+              >
+                <p className="text-sm font-medium text-ink-700">发给 Jev 的家庭背景</p>
+                <p className="text-sm text-ink-500">
+                  例如：我在 Neo Networks 工作，工资常显示为 PAY FOR…；Origin
+                  是电费不是房租。会附加到每次自动分类请求里。
+                </p>
+                <textarea
+                  className="field min-h-[7rem]"
+                  value={jevContext}
+                  onChange={(e) => setJevContext(e.target.value)}
+                  maxLength={4000}
+                  placeholder="我在 xx 公司工作…"
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  <button type="submit" className="btn-primary text-sm" disabled={busy}>
+                    保存提示词
+                  </button>
+                  {jevContextMsg && (
+                    <p className="text-sm text-ink-500">{jevContextMsg}</p>
+                  )}
+                </div>
+              </form>
+            )}
 
             <ul className="divide-y divide-ink-100">
               {(household.members || []).map((m) => (

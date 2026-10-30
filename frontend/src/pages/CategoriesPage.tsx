@@ -49,6 +49,29 @@ export function CategoriesPage() {
     }
   }
 
+  async function confirmSuggested(entry: PendingEntry) {
+    if (!entry.category_id) {
+      setError("这条还没有建议分类，请先点分类选择");
+      return;
+    }
+    setBusyId(entry.id);
+    setError("");
+    try {
+      await api(`/api/v1/entries/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          category_id: entry.category_id,
+          confirm: true,
+        }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "确认失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function runBatch() {
     setBatchMsg("排队分类中…");
     setError("");
@@ -58,7 +81,6 @@ export function CategoriesPage() {
         {
           method: "POST",
           body: JSON.stringify({
-            // Re-run current pending rows (name may have been fixed to merchant).
             entry_ids: pending.map((e) => e.id),
             only_unclassified: false,
             limit: Math.max(pending.length, 40),
@@ -87,7 +109,7 @@ export function CategoriesPage() {
         <div>
           <h1 className="font-display text-3xl text-ink-800">分类待确认</h1>
           <p className="mt-2 text-ink-500">
-            Jev 低置信度建议，点击分类改选并确认
+            Jev 低置信度建议；点分类可改选，右侧绿色对号确认当前建议
           </p>
         </div>
         <button type="button" className="btn-ghost" onClick={runBatch}>
@@ -104,7 +126,9 @@ export function CategoriesPage() {
             key={e.id}
             entry={e}
             label={catLabel(e.category_id)}
+            busy={busyId === e.id}
             onOpenPicker={() => setPickerEntry(e)}
+            onConfirm={() => confirmSuggested(e)}
           />
         ))}
       </ul>
@@ -127,15 +151,20 @@ export function CategoriesPage() {
 function PendingRow({
   entry,
   label,
+  busy,
   onOpenPicker,
+  onConfirm,
 }: {
   entry: PendingEntry;
   label: string;
+  busy: boolean;
   onOpenPicker: () => void;
+  onConfirm: () => void;
 }) {
   const conf = entry.category_confidence
     ? `${(Number(entry.category_confidence) * 100).toFixed(0)}%`
     : "—";
+  const canConfirm = Boolean(entry.category_id);
 
   return (
     <li className="py-6">
@@ -173,6 +202,27 @@ function PendingRow({
             onClick={onOpenPicker}
           />
         </div>
+        <button
+          type="button"
+          title={canConfirm ? "确认当前分类" : "先选择分类"}
+          aria-label="确认当前分类"
+          disabled={busy || !canConfirm}
+          onClick={onConfirm}
+          className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-emerald-600 ring-1 ring-emerald-200 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        </button>
       </div>
     </li>
   );

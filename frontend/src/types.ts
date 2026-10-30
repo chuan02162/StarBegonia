@@ -116,6 +116,7 @@ export type Household = {
   id: number;
   name: string;
   owner_person_id: number;
+  jev_context?: string;
   created_at: string;
   my_role?: string;
   members?: HouseholdMember[];

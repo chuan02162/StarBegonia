@@ -15,6 +15,10 @@ from app.sources.base import BillDraft, EntryDraft, RawPayload
 BASE_URL = "https://api.banksync.io"
 # Marketing docs use bnk_cba; we still auto-detect by bank name if unset.
 DEFAULT_BANK_HINTS = ("commbank", "commonwealth", "cba")
+# CDR banking rule: up to ~2 years of transaction history. Banks may expose less.
+MAX_LOOKBACK_DAYS = 730
+# Wide from/to windows can time out or truncate; pull in smaller slices.
+CHUNK_DAYS = 90
 
 
 class CommBankError(Exception):
@@ -59,6 +63,12 @@ class CommBankAdapter:
             )
 
         lookback_days = int(cred.get("lookback_days") or 90)
+        if lookback_days > MAX_LOOKBACK_DAYS:
+            raise CommBankError(
+                f"lookback_days max is {MAX_LOOKBACK_DAYS} (~2 years CDR). "
+                f"Got {lookback_days}; banks often expose less than that.",
+                400,
+            )
         to_date = (cred.get("to") or datetime.now(timezone.utc).strftime("%Y-%m-%d")).strip()
         # BankSync REST only accepts from/to (YYYY-MM-DD). Prefer explicit `from`,
         # else incremental `since` watermark, else lookback_days (first sync).
@@ -75,30 +85,38 @@ class CommBankAdapter:
             ).strftime("%Y-%m-%d")
             incremental = False
         skip_pending = bool(cred.get("skip_pending", True))
+        windows = _date_windows(from_date, to_date, CHUNK_DAYS)
 
         all_txns: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
         for account in accounts:
             aid = account["id"]
-            page_cursor: str | None = None
-            while True:
-                payload = client.list_transactions(
-                    bank["id"],
-                    aid,
-                    from_date=from_date,
-                    to_date=to_date,
-                    cursor=page_cursor,
-                )
-                rows = payload.get("data") or []
-                for row in rows:
-                    row["_account"] = account
-                    row["_bank"] = bank
-                all_txns.extend(rows)
-                meta = payload.get("meta") or {}
-                if not meta.get("hasMore"):
-                    break
-                page_cursor = meta.get("cursor")
-                if not page_cursor:
-                    break
+            for win_from, win_to in windows:
+                page_cursor: str | None = None
+                while True:
+                    payload = client.list_transactions(
+                        bank["id"],
+                        aid,
+                        from_date=win_from,
+                        to_date=win_to,
+                        cursor=page_cursor,
+                    )
+                    rows = payload.get("data") or []
+                    for row in rows:
+                        tid = str(row.get("id") or "")
+                        if tid and tid in seen_ids:
+                            continue
+                        if tid:
+                            seen_ids.add(tid)
+                        row["_account"] = account
+                        row["_bank"] = bank
+                        all_txns.append(row)
+                    meta = payload.get("meta") or {}
+                    if not meta.get("hasMore"):
+                        break
+                    page_cursor = meta.get("cursor") or meta.get("nextCursor")
+                    if not page_cursor:
+                        break
 
         if skip_pending:
             all_txns = [t for t in all_txns if not t.get("pending")]
@@ -110,6 +128,7 @@ class CommBankAdapter:
                 "transactions": all_txns,
                 "from": from_date,
                 "to": to_date,
+                "windows": len(windows),
                 "incremental": incremental,
                 "since": since.isoformat() if since else None,
             },
@@ -295,6 +314,24 @@ def _txn_to_draft(txn: dict[str, Any]) -> BillDraft | None:
         note="; ".join(note_parts) if note_parts else None,
         entries=[entry],
     )
+
+
+def _date_windows(
+    from_date: str, to_date: str, chunk_days: int = CHUNK_DAYS
+) -> list[tuple[str, str]]:
+    """Split inclusive YYYY-MM-DD range into chunk_days-sized windows."""
+    start = datetime.strptime(from_date[:10], "%Y-%m-%d").date()
+    end = datetime.strptime(to_date[:10], "%Y-%m-%d").date()
+    if start > end:
+        start, end = end, start
+    windows: list[tuple[str, str]] = []
+    cur = start
+    step = max(int(chunk_days), 1)
+    while cur <= end:
+        chunk_end = min(cur + timedelta(days=step - 1), end)
+        windows.append((cur.isoformat(), chunk_end.isoformat()))
+        cur = chunk_end + timedelta(days=1)
+    return windows
 
 
 def _parse_sync_since(value: Any) -> datetime | None:

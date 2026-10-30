@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
+
+from sqlalchemy import or_
 
 from app.extensions import db
 from app.models import Bill, Entry, Person
@@ -35,6 +37,23 @@ def _parse_datetime(value: Any) -> datetime:
         raise BillsError("invalid occurred_at") from exc
 
 
+def _parse_date_only(value: str | None, *, end: bool = False) -> datetime | None:
+    """Parse YYYY-MM-DD (or ISO datetime); end=True → exclusive next-day midnight."""
+    if not value or not str(value).strip():
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        if "T" in text:
+            dt = datetime.fromisoformat(text).replace(tzinfo=None)
+            return dt
+        dt = datetime.strptime(text[:10], "%Y-%m-%d")
+    except ValueError as exc:
+        raise BillsError(f"invalid date: {value}") from exc
+    if end:
+        return dt + timedelta(days=1)
+    return dt
+
+
 def list_bills(
     *,
     viewer_person_id: int,
@@ -42,27 +61,53 @@ def list_bills(
     person_id: int | None = None,
     category_id: str | None = None,
     classification_status: str | None = None,
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> list[Bill]:
-    q = household_service.visible_bills_query(viewer_person_id)
+) -> dict[str, Any]:
+    query = household_service.visible_bills_query(viewer_person_id)
     if source_type:
-        q = q.filter(Bill.source_type == source_type)
+        query = query.filter(Bill.source_type == source_type)
     if person_id:
-        q = q.filter(Bill.person_id == person_id)
-    if category_id or classification_status:
-        q = q.join(Entry)
+        query = query.filter(Bill.person_id == person_id)
+
+    start = _parse_date_only(date_from)
+    end = _parse_date_only(date_to, end=True)
+    if start:
+        query = query.filter(Bill.occurred_at >= start)
+    if end:
+        query = query.filter(Bill.occurred_at < end)
+
+    need_entry_join = bool(category_id or classification_status or (q and q.strip()))
+    if need_entry_join:
+        query = query.outerjoin(Entry)
         if category_id:
-            q = q.filter(Entry.category_id == category_id)
+            query = query.filter(Entry.category_id == category_id)
         if classification_status:
-            q = q.filter(Entry.classification_status == classification_status)
-        q = q.distinct()
-    return (
-        q.order_by(Bill.occurred_at.desc(), Bill.id.desc())
-        .offset(offset)
-        .limit(min(limit, 200))
+            query = query.filter(Entry.classification_status == classification_status)
+        if q and q.strip():
+            pattern = f"%{q.strip()}%"
+            query = query.filter(
+                or_(
+                    Bill.merchant.ilike(pattern),
+                    Bill.note.ilike(pattern),
+                    Entry.name.ilike(pattern),
+                    Entry.note.ilike(pattern),
+                )
+            )
+        query = query.distinct()
+
+    page_size = min(max(limit, 1), 200)
+    rows = (
+        query.order_by(Bill.occurred_at.desc(), Bill.id.desc())
+        .offset(max(offset, 0))
+        .limit(page_size + 1)
         .all()
     )
+    has_more = len(rows) > page_size
+    return {"bills": rows[:page_size], "has_more": has_more, "limit": page_size, "offset": offset}
 
 
 def get_bill(bill_id: int, *, viewer_person_id: int) -> Bill:

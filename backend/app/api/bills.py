@@ -16,18 +16,34 @@ def list_bills():
     person_id = request.args.get("person_id", type=int)
     category_id = request.args.get("category_id")
     classification_status = request.args.get("classification_status")
-    limit = request.args.get("limit", default=50, type=int)
+    q = request.args.get("q")
+    date_from = request.args.get("date_from") or request.args.get("from")
+    date_to = request.args.get("date_to") or request.args.get("to")
+    limit = request.args.get("limit", default=40, type=int)
     offset = request.args.get("offset", default=0, type=int)
-    bills = bills_service.list_bills(
-        viewer_person_id=person.id,
-        source_type=source_type,
-        person_id=person_id,
-        category_id=category_id,
-        classification_status=classification_status,
-        limit=limit,
-        offset=offset,
+    try:
+        result = bills_service.list_bills(
+            viewer_person_id=person.id,
+            source_type=source_type,
+            person_id=person_id,
+            category_id=category_id,
+            classification_status=classification_status,
+            q=q,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+            offset=offset,
+        )
+    except bills_service.BillsError as exc:
+        return jsonify({"error": exc.message}), exc.status_code
+    return jsonify(
+        {
+            "bills": [b.to_dict() for b in result["bills"]],
+            "has_more": result["has_more"],
+            "limit": result["limit"],
+            "offset": result["offset"],
+        }
     )
-    return jsonify({"bills": [b.to_dict() for b in bills]})
 
 
 @bp.get("/<int:bill_id>")

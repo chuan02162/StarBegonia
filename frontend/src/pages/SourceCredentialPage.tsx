@@ -18,6 +18,7 @@ export function SourceCredentialPage() {
 
   const [refreshToken, setRefreshToken] = useState("");
   const [lookbackDays, setLookbackDays] = useState("90");
+  const LOOKBACK_MAX = 730;
   /** One account number per line — never loads other people's full account list. */
   const [accountNumbersText, setAccountNumbersText] = useState("");
   const [verifyHint, setVerifyHint] = useState("");
@@ -96,7 +97,10 @@ export function SourceCredentialPage() {
           ? { refresh_token: refreshToken.trim() }
           : {
               account_numbers: nums,
-              lookback_days: Number(lookbackDays) || 90,
+              lookback_days: Math.min(
+                Math.max(Number(lookbackDays) || 90, 1),
+                LOOKBACK_MAX,
+              ),
               skip_pending: true,
             };
       await api(`/api/v1/people/${personId}/credentials/${sourceType}`, {
@@ -133,12 +137,19 @@ export function SourceCredentialPage() {
         sourceType === "commbank"
           ? "/api/v1/sources/commbank/sync"
           : "/api/v1/sources/coles/sync";
+      const days = Math.min(
+        Math.max(Number(lookbackDays) || 90, 1),
+        LOOKBACK_MAX,
+      );
+      if (sourceType === "commbank" && Number(lookbackDays) > LOOKBACK_MAX) {
+        setLookbackDays(String(LOOKBACK_MAX));
+      }
       const body =
         sourceType === "commbank"
           ? {
               person_id: personId,
               async: true,
-              lookback_days: Number(lookbackDays) || 90,
+              lookback_days: days,
             }
           : { person_id: personId, async: true };
 
@@ -245,6 +256,10 @@ export function SourceCredentialPage() {
                 onChange={(e) => setLookbackDays(e.target.value)}
                 inputMode="numeric"
               />
+              <p className="mt-1.5 text-xs text-ink-400">
+                CDR / BankSync 通常最多约 730 天（2 年）；更长会失败。银行也可能只给半年左右。大范围会按约
+                90 天一段拉取。
+              </p>
             </label>
           </>
         )}

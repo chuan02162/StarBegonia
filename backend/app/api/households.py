@@ -36,6 +36,24 @@ def create_household():
     return jsonify({"household": hh.to_dict(include_members=True)}), 201
 
 
+@bp.patch("/me")
+@login_required
+def update_my_household():
+    body = request.get_json(silent=True) or {}
+    person = current_person()
+    kwargs: dict = {"person_id": person.id}
+    if "name" in body:
+        kwargs["name"] = body.get("name")
+    if "jev_context" in body:
+        kwargs["jev_context"] = body.get("jev_context")
+    try:
+        hh = household_service.update_household(**kwargs)
+    except household_service.HouseholdError as exc:
+        return jsonify({"error": exc.message}), exc.status_code
+    data = household_service.get_household_for_person(person.id)
+    return jsonify({"household": data or hh.to_dict(include_members=True)})
+
+
 @bp.post("/leave")
 @login_required
 def leave():

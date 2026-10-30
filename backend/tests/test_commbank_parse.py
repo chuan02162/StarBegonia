@@ -1,7 +1,12 @@
 from decimal import Decimal
 
 from app.sources.base import RawPayload
-from app.sources.commbank import CommBankAdapter, _filter_accounts
+from app.sources.commbank import (
+    MAX_LOOKBACK_DAYS,
+    CommBankAdapter,
+    _date_windows,
+    _filter_accounts,
+)
 
 
 def test_parse_bank_transactions():
@@ -73,6 +78,13 @@ def test_filter_accounts_by_number():
     ]
     matched = _filter_accounts(accounts, {"account_numbers": ["11070639", "2872-1148"]})
     assert [a["id"] for a in matched] == ["opaque_a", "opaque_c"]
+
+
+def test_date_windows_chunking():
+    wins = _date_windows("2024-01-01", "2024-04-15", 90)
+    assert wins[0] == ("2024-01-01", "2024-03-30")
+    assert wins[-1][1] == "2024-04-15"
+    assert MAX_LOOKBACK_DAYS == 730
 
 
 def test_title_prefers_merchant_over_generic_description():

@@ -119,6 +119,19 @@ def sync_commbank():
             lookback_days = int(lookback_days)
         except (TypeError, ValueError):
             return jsonify({"error": "lookback_days must be an integer"}), 400
+        from app.sources.commbank import MAX_LOOKBACK_DAYS
+
+        if lookback_days > MAX_LOOKBACK_DAYS:
+            return jsonify(
+                {
+                    "error": (
+                        f"lookback_days max is {MAX_LOOKBACK_DAYS} (~2 years CDR). "
+                        "800+ days usually fails because banks/CDR do not expose that far."
+                    )
+                }
+            ), 400
+        if lookback_days < 1:
+            return jsonify({"error": "lookback_days must be >= 1"}), 400
     from_date = body.get("from")
     to_date = body.get("to")
     full_sync = bool(body.get("full_sync"))
@@ -128,6 +141,8 @@ def sync_commbank():
         try:
             from rq import Queue
 
+            # Long lookbacks are chunked into ~90-day windows — allow more time.
+            timeout = 1800 if (lookback_days or 0) > 120 else 600
             queue = Queue("default", connection=_redis())
             job = queue.enqueue(
                 run_commbank_sync,
@@ -136,7 +151,7 @@ def sync_commbank():
                 from_date,
                 to_date,
                 full_sync,
-                job_timeout=600,
+                job_timeout=timeout,
                 result_ttl=3600,
                 failure_ttl=3600,
             )

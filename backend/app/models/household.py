@@ -11,6 +11,8 @@ class Household(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
     owner_person_id = db.Column(db.Integer, db.ForeignKey("people.id"), nullable=False)
+    # Extra context appended to Jev classify prompts (employer, nicknames, …)
+    jev_context = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     owner = db.relationship("Person", foreign_keys=[owner_person_id])
@@ -25,6 +27,7 @@ class Household(db.Model):
             "id": self.id,
             "name": self.name,
             "owner_person_id": self.owner_person_id,
+            "jev_context": self.jev_context or "",
             "created_at": self.created_at.isoformat() + "Z",
         }
         if include_members:

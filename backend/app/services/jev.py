@@ -15,6 +15,20 @@ class JevError(Exception):
         self.status_code = status_code
 
 
+_BASE_INSTRUCTIONS = (
+    "Classify this household finance line item into exactly one category. "
+    "Prefer groceries for food staples from a supermarket; "
+    "household for cleaning and non-food essentials; "
+    "dining for restaurants/takeaway; "
+    "rent for rent / bond / payments to a rental agency or landlord; "
+    "utilities for electricity, gas, water, internet; "
+    "subscriptions for recurring digital services (music, streaming, cloud); "
+    "salary only for employment payroll; "
+    "transfer for person-to-person or account transfers that are not spend; "
+    "other only when nothing else fits."
+)
+
+
 def classify_entry_state(
     *,
     name: str,
@@ -23,6 +37,7 @@ def classify_entry_state(
     source_type: str | None,
     note: str | None,
     categories: list[dict[str, str]],
+    household_context: str | None = None,
 ) -> dict[str, Any]:
     """Call Jev once for category choice. Returns parsed result."""
     api_key = current_app.config.get("JEV_API_KEY") or ""
@@ -35,32 +50,31 @@ def classify_entry_state(
     if not criteria:
         raise JevError("no categories in vocabulary", 500)
 
+    instructions = _BASE_INSTRUCTIONS
+    ctx = (household_context or "").strip()
+    if ctx:
+        instructions = (
+            f"{instructions} Additional household context from the user "
+            f"(treat as trusted background, not as the transaction itself): {ctx}"
+        )
+
     questions: dict[str, Any] = {
         "category": {
             "type": "choice",
-            "instructions": (
-                "Classify this household finance line item into exactly one category. "
-                "Prefer groceries for food staples from a supermarket; "
-                "household for cleaning and non-food essentials; "
-                "dining for restaurants/takeaway; "
-                "rent for rent / bond / payments to a rental agency or landlord; "
-                "utilities for electricity, gas, water, internet; "
-                "subscriptions for recurring digital services (music, streaming, cloud); "
-                "salary only for employment payroll; "
-                "transfer for person-to-person or account transfers that are not spend; "
-                "other only when nothing else fits."
-            ),
+            "instructions": instructions,
             "criteria": criteria,
         }
     }
 
-    state = {
+    state: dict[str, Any] = {
         "name": name,
         "amount": amount,
         "merchant": merchant,
         "source_type": source_type,
         "note": note,
     }
+    if ctx:
+        state["household_context"] = ctx
     raw = _post_systemone(state=state, questions=questions)
     return _parse_answers(raw)
 

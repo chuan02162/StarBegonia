@@ -46,6 +46,13 @@ def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
     if label != (entry.name or "").strip():
         entry.name = label[:255]
 
+    household_context = None
+    if bill and bill.household_id:
+        from app.models import Household
+
+        hh = db.session.get(Household, bill.household_id)
+        household_context = (hh.jev_context or "").strip() if hh else None
+
     try:
         result = classify_entry_state(
             name=label,
@@ -54,6 +61,7 @@ def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
             source_type=bill.source_type if bill else None,
             note=entry.note or (bill.note if bill else None),
             categories=categories,
+            household_context=household_context or None,
         )
     except JevError as exc:
         raise ClassifyError(exc.message, exc.status_code or 502) from exc
