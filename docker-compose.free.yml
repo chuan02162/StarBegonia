@@ -87,6 +87,28 @@ services:
       DAILY_SYNC_HOUR: "0"
       DAILY_SYNC_MINUTE: "0"
       DAILY_SYNC_GAP_SECONDS: "60"
+      RQ_QUEUES: sync
+    volumes:
+      - ./config:/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 220m
+    restart: unless-stopped
+
+  worker-classify:
+    build: ./backend
+    command: ["python", "worker.py"]
+    env_file: .env
+    environment:
+      STARBEGONIA_ENV: production
+      DATABASE_URL: postgresql+psycopg2://starbegonia:${POSTGRES_PASSWORD}@postgres:5432/starbegonia
+      REDIS_URL: redis://redis:6379/0
+      CATEGORIES_PATH: /config/categories.yaml
+      DAILY_SYNC_ENABLED: "0"
+      RQ_QUEUES: default
     volumes:
       - ./config:/config:ro
     depends_on:

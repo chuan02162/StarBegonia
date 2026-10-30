@@ -10,6 +10,7 @@ from app.models import Bill, Entry, HouseholdMembership, Person, Settlement
 from app.services import aa_rules as aa_service
 from app.services.aa_rules import AaRuleError, require_household
 from app.services.analytics import EXCLUDE_IDS, _period_bounds
+from app.services.households import exclude_non_external_bills
 
 Granularity = Literal["week", "month", "quarter", "year"]
 STATUS_DRAFT = "draft"
@@ -80,17 +81,14 @@ def compute_settlement_result(
     unmatched_entries = 0
     lines: list[dict[str, Any]] = []
 
-    bills = (
+    bills = exclude_non_external_bills(
         Bill.query.filter(
             Bill.household_id == household_id,
             Bill.occurred_at >= period_start,
             Bill.occurred_at < period_end,
             Bill.currency == currency,
-            Bill.dedup_primary_id.is_(None),  # skip linked secondary (e.g. bank)
         )
-        .order_by(Bill.occurred_at.asc(), Bill.id.asc())
-        .all()
-    )
+    ).order_by(Bill.occurred_at.asc(), Bill.id.asc()).all()
 
     for bill in bills:
         payer_id = bill.person_id

@@ -11,7 +11,6 @@ _ADAPTERS: dict[str, SourceAdapter] = {
     OpenFeedAdapter.source_type: OpenFeedAdapter(),
 }
 
-
 def get_adapter(source_type: str) -> SourceAdapter:
     try:
         return _ADAPTERS[source_type]

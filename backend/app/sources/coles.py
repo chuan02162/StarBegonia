@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from http.cookiejar import CookieJar
 from typing import Any
+
+from flask import current_app
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
 from urllib.request import HTTPCookieProcessor, Request, build_opener
@@ -21,6 +24,8 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
 )
 PAGE_SIZE = 20
+# Hard cap so a broken BFF (ignoring pageNumber / inflated totals) cannot loop forever.
+HARD_MAX_PAGES = 250
 PRODUCT_IMAGE_BASE = "https://cdn.productimages.coles.com.au/productimages"
 
 
@@ -44,45 +49,126 @@ class ColesAdapter:
         client.authenticate()
 
         start_page = int(cursor) if cursor and str(cursor).isdigit() else 1
-        max_pages = int(cred.get("max_pages") or 0)  # 0 = all pages
+        max_pages = int(cred.get("max_pages") or 0)  # 0 = all pages (still HARD_MAX_PAGES)
         # Coles BFF ignores date query params (probed); list is newest-first with
         # orderPlacementTime — stop paging once we pass the watermark.
         since_raw = cred.get("since")
         since = _parse_dt(since_raw) if since_raw else None
         incremental = bool(cred.get("incremental") and since)
+        on_progress = cred.get("_on_progress")
+
+        def _progress(*, current: int, total: int, message: str) -> None:
+            if not callable(on_progress):
+                return
+            try:
+                on_progress(current=current, total=max(total, 1), message=message)
+            except Exception:
+                pass
 
         summaries: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
         page = start_page
         listed = 0
         hit_watermark = False
+        pages_fetched = 0
         while True:
             chunk = client.list_orders(page_number=page, page_size=PAGE_SIZE)
+            pages_fetched += 1
             orders = chunk.get("orders") or []
             if not orders:
                 break
+            new_on_page = 0
             for order in orders:
                 listed += 1
-                placed = _parse_dt(order.get("orderPlacementTime"))
-                if since and placed and placed < since:
+                placed = _parse_dt_optional(order.get("orderPlacementTime"))
+                # Missing placement time must not fake "now" or incremental never stops.
+                if since and placed is not None and placed < since:
                     hit_watermark = True
                     break
+                key = (
+                    str(order.get("orderId") or "")
+                    + ":"
+                    + str(order.get("transactionId") or "")
+                )
+                if key == ":" or key in seen_keys:
+                    continue
+                seen_keys.add(key)
                 summaries.append(order)
-            total = int(chunk.get("totalNoOfOrders") or 0)
-            if hit_watermark or listed >= total or len(orders) < PAGE_SIZE:
+                new_on_page += 1
+            try:
+                total = int(chunk.get("totalNoOfOrders") or 0)
+            except (TypeError, ValueError):
+                total = 0
+            _progress(
+                current=len(summaries),
+                total=max(total, len(summaries), 1),
+                message=f"列出 Coles 订单第 {pages_fetched} 页（{len(summaries)} 笔）…",
+            )
+            # Stop if BFF ignores pagination and repeats the same page.
+            if new_on_page == 0:
+                break
+            if hit_watermark or (total > 0 and listed >= total) or len(orders) < PAGE_SIZE:
                 break
             page += 1
-            if max_pages and (page - start_page + 1) > max_pages:
+            pages_done = page - start_page + 1
+            if max_pages and pages_done > max_pages:
+                break
+            if pages_done > HARD_MAX_PAGES:
                 break
 
         details: list[dict[str, Any]] = []
-        for summary in summaries:
-            order_id = str(summary.get("orderId") or "")
-            txn = str(summary.get("transactionId") or "")
-            if not order_id or not txn:
-                continue
-            detail = client.get_order(order_id, txn)
-            detail["_summary"] = summary
-            details.append(detail)
+        detail_total = max(len(summaries), 1)
+        try:
+            configured_concurrency = int(
+                current_app.config.get("SOURCE_SYNC_CONCURRENCY", 4)
+            )
+        except RuntimeError:
+            configured_concurrency = 4
+        concurrency = min(max(configured_concurrency, 1), 4)
+
+        async def fetch_details():
+            semaphore = asyncio.Semaphore(concurrency)
+            valid_summaries = [
+                (idx, summary)
+                for idx, summary in enumerate(summaries)
+                if summary.get("orderId") and summary.get("transactionId")
+            ]
+
+            async def fetch_one(idx: int, summary: dict[str, Any]):
+                async with semaphore:
+                    detail = await asyncio.to_thread(
+                        client.get_order,
+                        str(summary["orderId"]),
+                        str(summary["transactionId"]),
+                    )
+                detail["_summary"] = summary
+                return idx, detail
+
+            tasks = [
+                asyncio.create_task(fetch_one(idx, summary))
+                for idx, summary in valid_summaries
+            ]
+            ordered_details: dict[int, dict[str, Any]] = {}
+            for completed, task in enumerate(asyncio.as_completed(tasks), start=1):
+                idx, detail = await task
+                ordered_details[idx] = detail
+                _progress(
+                    current=completed,
+                    total=max(len(valid_summaries), 1),
+                    message=(
+                        f"拉取 Coles 订单详情 {completed}/{len(valid_summaries)}…"
+                    ),
+                )
+            return [ordered_details[idx] for idx, _ in valid_summaries]
+
+        details = asyncio.run(fetch_details())
+
+        if summaries:
+            _progress(
+                current=detail_total,
+                total=detail_total,
+                message=f"已拉取 {len(details)} 笔 Coles 订单",
+            )
 
         return RawPayload(
             data={
@@ -93,6 +179,7 @@ class ColesAdapter:
                 "since": since.isoformat() if since else None,
                 "listed": listed,
                 "detailed": len(details),
+                "pages": pages_fetched,
             },
             cursor=str(page + 1) if summaries else None,
         )
@@ -409,20 +496,24 @@ def _product_image_url(item: dict[str, Any]) -> str | None:
     return f"{PRODUCT_IMAGE_BASE}{raw}"
 
 
-def _parse_dt(value: Any) -> datetime:
+def _parse_dt_optional(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         dt = value
-    elif isinstance(value, str) and value:
-        text = value.replace("Z", "+00:00")
+    elif isinstance(value, str) and value.strip():
+        text = value.strip().replace("Z", "+00:00")
         try:
             dt = datetime.fromisoformat(text)
         except ValueError:
-            dt = datetime.utcnow()
+            return None
     else:
-        dt = datetime.utcnow()
+        return None
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
+
+
+def _parse_dt(value: Any) -> datetime:
+    return _parse_dt_optional(value) or datetime.utcnow()
 
 
 def _dec(value: Any) -> Decimal:

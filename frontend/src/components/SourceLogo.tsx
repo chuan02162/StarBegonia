@@ -3,7 +3,6 @@ type Props = { source: string; className?: string };
 const LOGO_SRC: Record<string, string> = {
   coles: "/coles.png",
   commbank: "/commbank.png",
-  openfeed: "/commbank.png",
 };
 
 export function SourceLogo({ source, className = "h-10 w-10" }: Props) {
@@ -29,7 +28,7 @@ export function SourceLogo({ source, className = "h-10 w-10" }: Props) {
 
 export const SOURCE_LABELS: Record<string, string> = {
   coles: "Coles",
-  openfeed: "OpenFeed 银行",
-  commbank: "CommBank（旧）",
+  commbank: "CommBank",
+  wws: "Woolworths",
   manual: "手动记账",
 };

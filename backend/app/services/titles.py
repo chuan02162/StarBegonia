@@ -1,4 +1,4 @@
-"""Prefer human bank titles over BankSync placeholder descriptions."""
+"""Prefer human bank titles over provider placeholder descriptions."""
 
 from __future__ import annotations
 

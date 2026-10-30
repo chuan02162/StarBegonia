@@ -43,8 +43,10 @@ class Config:
         "JEV_API_URL", "https://api.typesafe.ai/v1/systemone"
     )
     JEV_MODEL = os.environ.get("JEV_MODEL", "jev-latest")
+    JEV_CONCURRENCY = int(os.environ.get("JEV_CONCURRENCY", "8"))
     # Below this confidence → classification_status = pending
     JEV_CONFIDENCE_THRESHOLD = float(os.environ.get("JEV_CONFIDENCE_THRESHOLD", "0.7"))
+    SOURCE_SYNC_CONCURRENCY = int(os.environ.get("SOURCE_SYNC_CONCURRENCY", "4"))
 
     # Public site origin (OAuth redirect + jwksUri base), e.g. http://1cchome1.duckdns.org:5173
     APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")

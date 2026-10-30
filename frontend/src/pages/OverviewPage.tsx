@@ -79,7 +79,9 @@ export function OverviewPage() {
           <h1 className="font-display text-3xl text-ink-800 sm:text-4xl">
             {user?.person?.display_name}
           </h1>
-          <p className="mt-2 text-ink-500">本周期支出一眼看清</p>
+          <p className="mt-2 text-ink-500">
+            按家庭整体统计对外收支，已排除去重从记录和内部转账。
+          </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -229,6 +231,7 @@ function TrendChart({
   series: OverviewData["series"];
   currency: string;
 }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const values = series.map((s) => Number(s.expense));
   const max = Math.max(...values, 1);
   const w = 360;
@@ -245,23 +248,60 @@ function TrendChart({
   }
 
   return (
-    <div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-auto w-full max-w-lg" role="img">
+    <div className="relative">
+      {hoveredIndex !== null && series[hoveredIndex] && (
+        <div className="pointer-events-none absolute right-2 top-2 z-10 rounded-md bg-white/95 px-3 py-2 text-xs shadow-md ring-1 ring-ink-200">
+          <p className="mb-1 font-medium text-ink-800">
+            {series[hoveredIndex].label} · 区间详情
+          </p>
+          <p className="text-ink-600">
+            支出 {formatMoney(series[hoveredIndex].expense, currency)}
+          </p>
+          <p className="text-ink-600">
+            收入 {formatMoney(series[hoveredIndex].income, currency)}
+          </p>
+          <p className="text-ink-600">
+            净额 {formatMoney(series[hoveredIndex].balance, currency)}
+          </p>
+        </div>
+      )}
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        className="h-auto w-full max-w-lg"
+        role="img"
+        aria-label="按周期统计的支出柱状图"
+      >
         {series.map((s, i) => {
           const v = Number(s.expense);
           const bh = (v / max) * chartH;
           const x = padX + i * (barW + barGap);
           const y = padTop + chartH - bh;
-          const active = i === series.length - 1;
+          const active = i === (hoveredIndex ?? series.length - 1);
           return (
-            <g key={s.start}>
+            <g
+              key={s.start}
+              className="cursor-pointer"
+              tabIndex={0}
+              role="button"
+              aria-label={`${s.label}，支出 ${formatMoney(s.expense, currency)}，收入 ${formatMoney(s.income, currency)}，净额 ${formatMoney(s.balance, currency)}`}
+              onMouseEnter={() => setHoveredIndex(i)}
+              onMouseLeave={() => setHoveredIndex(null)}
+              onFocus={() => setHoveredIndex(i)}
+              onBlur={() => setHoveredIndex(null)}
+            >
               <rect
                 x={x}
                 y={y}
                 width={barW}
                 height={Math.max(bh, v > 0 ? 2 : 0)}
                 rx={3}
-                className={active ? "fill-ink-600" : "fill-ink-200"}
+                className={`${
+                  hoveredIndex === i
+                    ? "fill-amber-500"
+                    : active
+                      ? "fill-ink-600"
+                      : "fill-ink-200"
+                } transition-colors`}
               >
                 <title>
                   {s.label}: {formatMoney(v, currency)}

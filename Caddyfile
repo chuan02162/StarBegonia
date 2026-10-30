@@ -1,0 +1,3 @@
+1cchome1.duckdns.org {
+	reverse_proxy web:80
+}

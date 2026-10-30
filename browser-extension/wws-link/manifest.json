@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "StarBegonia Woolworths Link",
+  "version": "0.1.0",
+  "description": "Bind the current Woolworths browser session to StarBegonia.",
+  "permissions": ["cookies"],
+  "optional_host_permissions": [
+    "https://www.woolworths.com.au/*",
+    "https://1cchome1.duckdns.org/*",
+    "https://localhost/*",
+    "http://localhost/*",
+    "https://127.0.0.1/*",
+    "http://127.0.0.1/*"
+  ],
+  "action": {
+    "default_title": "StarBegonia Woolworths",
+    "default_popup": "popup.html"
+  }
+}

@@ -16,12 +16,9 @@ function BillCard({
   return (
     <div className="min-w-0 flex-1 space-y-1">
       <p className="text-xs uppercase tracking-wide text-ink-400">{role}</p>
-      <Link
-        to={`/bills/${bill.id}`}
-        className="font-medium text-ink-800 hover:underline"
-      >
+      <p className="font-medium text-ink-800">
         {bill.merchant || `账单 #${bill.id}`}
-      </Link>
+      </p>
       <p className="flex flex-wrap items-center gap-2 text-sm text-ink-500">
         <SourceLogo source={bill.source_type} className="h-5 w-5" />
         {SOURCE_LABELS[bill.source_type] || bill.source_type}
@@ -76,7 +73,7 @@ export function InternalTransfersPage() {
   }
 
   async function unlink(linkId: number) {
-    if (!window.confirm("取消这对内部转账？双方会恢复原分类并重新计入概览与结算。"))
+    if (!window.confirm("取消这对内部转账？双方会重新出现在流水、概览与结算。"))
       return;
     setBusy(true);
     setError("");
@@ -106,7 +103,7 @@ export function InternalTransfersPage() {
           </p>
           <h1 className="mt-2 font-display text-3xl text-ink-800">内部转账</h1>
           <p className="mt-2 max-w-xl text-ink-500">
-            按银行 reference、金额与时间自动配对家庭成员之间的 PayID / 转账，标为「转账不计收支」。
+            家庭成员之间的 PayID / 转账只在此处显示；流水、概览和 AA 结算按家庭整体的对外收支计算。
           </p>
         </div>
         <button

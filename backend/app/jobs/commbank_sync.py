@@ -9,6 +9,7 @@ def run_commbank_sync(
     from_date: str | None = None,
     to_date: str | None = None,
     full_sync: bool = False,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     from app import create_app
     from app.services.sync import SyncError, sync_commbank_source
@@ -22,6 +23,7 @@ def run_commbank_sync(
                 from_date=from_date,
                 to_date=to_date,
                 full_sync=full_sync,
+                overwrite=overwrite,
             )
         except SyncError as exc:
             return {"error": exc.message, "status_code": exc.status_code}

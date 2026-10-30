@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+
+from flask import current_app
 
 from app.sources.base import BillDraft, EntryDraft, RawPayload
 from app.services.openfeed_auth import (
@@ -25,7 +28,7 @@ class OpenFeedError(Exception):
 
 
 class OpenFeedAdapter:
-    source_type = "openfeed"
+    source_type = "commbank"
 
     def validate_credential(self, cred: dict[str, Any]) -> bool:
         return bool((cred.get("refresh_token") or "").strip())
@@ -80,46 +83,102 @@ class OpenFeedAdapter:
             accounts = [a for a in accounts if str(a.get("accountId")) in wanted_accounts]
 
         windows = _date_windows(from_date, to_date, CHUNK_DAYS)
+        on_progress = cred.get("_on_progress")
+        usable_accounts = [
+            a for a in accounts if str(a.get("accountId") or "").strip()
+        ]
+        fetch_total = max(len(usable_accounts) * max(len(windows), 1), 1)
+        try:
+            configured_concurrency = int(
+                current_app.config.get("SOURCE_SYNC_CONCURRENCY", 4)
+            )
+        except RuntimeError:
+            configured_concurrency = 4
+        concurrency = min(max(configured_concurrency, 1), 4)
+
+        async def fetch_window(
+            semaphore: asyncio.Semaphore,
+            index: int,
+            account: dict[str, Any],
+            oldest: str,
+            newest: str,
+        ):
+            aid = str(account.get("accountId") or "")
+            rows_for_window: list[dict[str, Any]] = []
+            offset = 0
+            while True:
+                async with semaphore:
+                    page = await asyncio.to_thread(
+                        api_get,
+                        f"/banking/accounts/{aid}/transactions",
+                        access_token=access,
+                        params={
+                            "oldestDate": oldest,
+                            "newestDate": newest,
+                            "limit": "1000",
+                            "offset": str(offset),
+                        },
+                    )
+                rows = page.get("data") or []
+                if isinstance(rows, dict):
+                    rows = [rows]
+                rows_for_window.extend(rows)
+                links = page.get("links") or {}
+                if not links.get("next") or not rows:
+                    break
+                offset += len(rows) or 1000
+            return index, account, rows_for_window
+
+        async def fetch_all_windows():
+            semaphore = asyncio.Semaphore(concurrency)
+            jobs = [
+                (account, oldest, newest)
+                for account in usable_accounts
+                for oldest, newest in windows
+            ]
+            tasks = [
+                asyncio.create_task(
+                    fetch_window(semaphore, index, account, oldest, newest)
+                )
+                for index, (account, oldest, newest) in enumerate(jobs)
+            ]
+            completed = 0
+            row_count = 0
+            results: dict[int, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+            for task in asyncio.as_completed(tasks):
+                index, account, rows = await task
+                completed += 1
+                row_count += len(rows)
+                results[index] = (account, rows)
+                if callable(on_progress):
+                    try:
+                        on_progress(
+                            current=completed,
+                            total=fetch_total,
+                            message=(
+                                f"拉取 OpenFeed {completed}/{fetch_total} "
+                                f"（已得 {row_count} 笔）…"
+                            ),
+                        )
+                    except Exception:
+                        pass
+            return [results[index] for index in range(len(jobs))]
+
+        try:
+            window_results = asyncio.run(fetch_all_windows())
+        except OpenFeedAuthError as exc:
+            raise OpenFeedError(exc.message, exc.status_code) from exc
         all_txns: list[dict[str, Any]] = []
         seen: set[str] = set()
-
-        for account in accounts:
-            aid = str(account.get("accountId") or "")
-            if not aid:
-                continue
-            for oldest, newest in windows:
-                offset = 0
-                while True:
-                    try:
-                        page = api_get(
-                            f"/banking/accounts/{aid}/transactions",
-                            access_token=access,
-                            params={
-                                "oldestDate": oldest,
-                                "newestDate": newest,
-                                "limit": "1000",
-                                "offset": str(offset),
-                            },
-                        )
-                    except OpenFeedAuthError as exc:
-                        raise OpenFeedError(exc.message, exc.status_code) from exc
-                    rows = page.get("data") or []
-                    if isinstance(rows, dict):
-                        rows = [rows]
-                    for row in rows:
-                        tid = str(row.get("transactionId") or "")
-                        if tid and tid in seen:
-                            continue
-                        if tid:
-                            seen.add(tid)
-                        row["_account"] = account
-                        all_txns.append(row)
-                    links = page.get("links") or {}
-                    if not links.get("next"):
-                        break
-                    offset += len(rows) or 1000
-                    if not rows:
-                        break
+        for account, rows in window_results:
+            for row in rows:
+                tid = str(row.get("transactionId") or "")
+                if tid and tid in seen:
+                    continue
+                if tid:
+                    seen.add(tid)
+                row["_account"] = account
+                all_txns.append(row)
 
         if skip_pending:
             all_txns = [

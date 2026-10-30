@@ -104,7 +104,9 @@ export function BillsPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl text-ink-800">流水</h1>
-          <p className="mt-2 text-ink-500">点击账单查看明细</p>
+          <p className="mt-2 text-ink-500">
+            这里只显示家庭对外的收支；去重从记录和内部转账分别在专页查看。
+          </p>
         </div>
         <Link to="/bills/new" className="btn-primary">
           手动记账
@@ -112,7 +114,7 @@ export function BillsPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {["", "manual", "coles", "openfeed", "commbank"].map((s) => (
+        {["", "manual", "coles", "commbank"].map((s) => (
           <button
             key={s || "all"}
             type="button"

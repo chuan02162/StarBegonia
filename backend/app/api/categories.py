@@ -7,6 +7,8 @@ from rq.job import Job
 
 from app.api.deps import current_person, login_required
 from app.jobs.classify_job import run_classify_batch
+from app.jobs.progress import job_progress_payload
+from app.jobs.queues import default_queue
 from app.services import classify as classify_service
 from app.services.categories import get_vocabulary
 
@@ -83,10 +85,7 @@ def classify_batch():
 
     if async_mode:
         try:
-            from rq import Queue
-
-            queue = Queue("default", connection=_redis())
-            job = queue.enqueue(
+            job = default_queue(_redis()).enqueue(
                 run_classify_batch,
                 entry_ids,
                 only_unclassified,
@@ -126,7 +125,19 @@ def get_classify_job(job_id: str):
     except Exception as exc:
         return jsonify({"error": f"could not fetch job: {exc}"}), 503
 
-    payload: dict = {"job_id": job.id, "status": job.get_status()}
+    status = job.get_status()
+    status_value = getattr(status, "value", None) or str(status)
+    payload: dict = {"job_id": job.id, "status": status_value}
+    progress = job_progress_payload(job)
+    if progress:
+        payload["progress"] = progress
+    elif status_value == "queued":
+        payload["progress"] = {
+            "percent": 0,
+            "message": "排队等待 worker…",
+        }
+    elif status_value == "started":
+        payload["progress"] = {"percent": 0, "message": "分类运行中…"}
     if job.is_finished:
         payload["result"] = job.result
     if job.is_failed:

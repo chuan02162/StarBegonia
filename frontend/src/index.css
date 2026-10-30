@@ -54,3 +54,16 @@ body {
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+@keyframes job-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.job-progress-indeterminate {
+  animation: job-progress-slide 1.2s ease-in-out infinite;
+}

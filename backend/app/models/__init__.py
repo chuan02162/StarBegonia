@@ -8,6 +8,7 @@ from app.models.invite import Invite
 from app.models.person import Person
 from app.models.settlement import Settlement
 from app.models.user import User
+from app.models.wws_pairing import WwsPairing
 
 __all__ = [
     "User",
@@ -22,4 +23,5 @@ __all__ = [
     "Settlement",
     "DedupLink",
     "InternalTransferLink",
+    "WwsPairing",
 ]

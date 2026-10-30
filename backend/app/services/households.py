@@ -7,7 +7,16 @@ from typing import Any
 from sqlalchemy import and_, or_
 
 from app.extensions import db
-from app.models import Bill, Household, HouseholdMembership, Invite, Person, User
+from app.models import (
+    Bill,
+    DedupLink,
+    Household,
+    HouseholdMembership,
+    InternalTransferLink,
+    Invite,
+    Person,
+    User,
+)
 
 
 class HouseholdError(Exception):
@@ -345,7 +354,7 @@ def bootstrap_with_household(
 
 
 def visible_bills_query(person_id: int):
-    """Bills visible to person: full ledger while active; until left_at after leave."""
+    """External household flows visible to person, with internal records suppressed."""
     memberships = HouseholdMembership.query.filter_by(person_id=person_id).all()
     if not memberships:
         return Bill.query.filter(sa_false())
@@ -364,7 +373,23 @@ def visible_bills_query(person_id: int):
                     Bill.created_at < m.left_at,
                 )
             )
-    return Bill.query.filter(or_(*clauses))
+    return exclude_non_external_bills(Bill.query.filter(or_(*clauses)))
+
+
+def exclude_non_external_bills(query):
+    """Hide dedup secondary and linked household transfer bills from normal views."""
+    dedup_secondary = db.session.query(DedupLink.id).filter(
+        DedupLink.status == "linked",
+        DedupLink.secondary_bill_id == Bill.id,
+    ).exists()
+    internal_transfer = db.session.query(InternalTransferLink.id).filter(
+        InternalTransferLink.status == "linked",
+        or_(
+            InternalTransferLink.outgoing_bill_id == Bill.id,
+            InternalTransferLink.incoming_bill_id == Bill.id,
+        ),
+    ).exists()
+    return query.filter(~dedup_secondary, ~internal_transfer)
 
 
 def sa_false():
@@ -379,9 +404,17 @@ def bill_visible_to(person_id: int, bill: Bill) -> bool:
     memberships = HouseholdMembership.query.filter_by(
         person_id=person_id, household_id=bill.household_id
     ).all()
+    belongs_to_member = False
     for m in memberships:
         if m.left_at is None:
-            return True
+            belongs_to_member = True
+            break
         if m.joined_at <= bill.created_at < m.left_at:
-            return True
-    return False
+            belongs_to_member = True
+            break
+    if not belongs_to_member:
+        return False
+    return (
+        exclude_non_external_bills(Bill.query.filter(Bill.id == bill.id)).first()
+        is not None
+    )

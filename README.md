@@ -63,9 +63,9 @@ Coles 实现：`backend/app/sources/coles.py`（BFF auth + orders + detail）。
 - 成员页：粘贴 `refreshToken`（可选 user_id）并 **同步 Coles**  
 - Coles：`GET /api/bff/auth` 续期 → 列表 → `GET /api/bff/orders/{id}` + `x-transaction-id`  
 - Jev：词表 `config/categories.yaml` → 结构化分类；低置信度进「分类」待确认；流水可按分类筛选  
-- CommBank：经 [BankSync](https://banksync.io/docs)（`X-API-Key` / `banks:read`）拉取流水，每笔为单条 `general` entry  
+- CommBank：经 [OpenFeed CDR](https://openfeed.au/) OAuth 授权并拉取银行流水，每笔为单条 `general` entry
 
-`.env` 中配置 `JEV_API_KEY`、`BANKSYNC_API_KEY`（勿提交真实 key）。在 BankSync 先连接 CommBank，再在账户页启用同步。
+`.env` 中配置 `JEV_API_KEY` 和 OpenFeed OAuth 参数（勿提交真实 key），详见 [OpenFeed 配置说明](docs/openfeed-setup.md)。在账户页连接 CommBank 并启用同步。
 
 Worker 默认在 **Australia/Sydney 00:00** 串行增量同步所有已配置源（间隔见 `DAILY_SYNC_GAP_SECONDS`）。
 

@@ -30,7 +30,7 @@ export function formatMoney(
 
 /**
  * Date-only values are stored as midnight UTC → calendar date only.
- * Otherwise show local date + time (BankSync providerPostingDateTime, Coles, etc.).
+ * Otherwise show local date + time (provider posting date, Coles, etc.).
  */
 export function formatOccurredAt(iso: string | null | undefined): string {
   if (!iso) return "";

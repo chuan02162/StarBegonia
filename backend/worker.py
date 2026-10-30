@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from redis import Redis
 from rq import Worker
@@ -20,8 +21,15 @@ def main() -> None:
     app = create_app()
     with app.app_context():
         start_daily_sync_scheduler(app)
+        from app.jobs.queues import WORKER_QUEUES
+
         conn = Redis.from_url(app.config["REDIS_URL"])
-        worker = Worker(["default"], connection=conn)
+        queue_names = [
+            name.strip()
+            for name in os.environ.get("RQ_QUEUES", ",".join(WORKER_QUEUES)).split(",")
+            if name.strip()
+        ]
+        worker = Worker(queue_names, connection=conn)
         worker.work(with_scheduler=False)
 
 

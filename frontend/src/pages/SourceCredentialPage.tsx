@@ -2,9 +2,11 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { JobProgressBar } from "../components/JobProgressBar";
 import { SOURCE_LABELS, SourceLogo } from "../components/SourceLogo";
+import { pollJob, type JobProgress } from "../lib/jobs";
 
-const SUPPORTED = new Set(["coles", "openfeed"]);
+const SUPPORTED = new Set(["coles", "commbank", "wws"]);
 
 export function SourceCredentialPage() {
   const { sourceType = "" } = useParams();
@@ -16,6 +18,7 @@ export function SourceCredentialPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<JobProgress | null>(null);
   const [connecting, setConnecting] = useState(false);
 
   const [refreshToken, setRefreshToken] = useState("");
@@ -24,10 +27,13 @@ export function SourceCredentialPage() {
   const [jwksUri, setJwksUri] = useState("");
   const [grantId, setGrantId] = useState<string | null>(null);
   const [appConfigured, setAppConfigured] = useState(true);
+  const [pairingLink, setPairingLink] = useState("");
+  const [pairingExpiresAt, setPairingExpiresAt] = useState<string | null>(null);
 
   const supported = SUPPORTED.has(sourceType);
   const label = SOURCE_LABELS[sourceType] || sourceType;
-  const isOpenfeed = sourceType === "openfeed";
+  const isCommBank = sourceType === "commbank";
+  const isWws = sourceType === "wws";
 
   useEffect(() => {
     const connected = searchParams.get("connected");
@@ -35,8 +41,8 @@ export function SourceCredentialPage() {
     if (connected) {
       setMessage(
         searchParams.get("grant")
-          ? "OpenFeed 已授权并完成数据同意"
-          : "OpenFeed 已连接",
+          ? "CommBank 已授权并完成数据同意"
+          : "CommBank 已连接",
       );
       setSearchParams({}, { replace: true });
     } else if (err) {
@@ -54,14 +60,14 @@ export function SourceCredentialPage() {
       setConfigured(Boolean(cred));
       setUpdatedAt(cred?.updated_at ?? null);
     });
-    if (isOpenfeed) {
+    if (isCommBank) {
       api<{
         app_configured: boolean;
         connected: boolean;
         grant_id?: string | null;
         lookback_days?: number;
         jwks_uri?: string;
-      }>("/api/v1/sources/openfeed/status").then((s) => {
+      }>("/api/v1/sources/commbank/status").then((s) => {
         setAppConfigured(s.app_configured);
         setConfigured(s.connected);
         setGrantId(s.grant_id || null);
@@ -69,7 +75,15 @@ export function SourceCredentialPage() {
         if (s.jwks_uri) setJwksUri(s.jwks_uri);
       });
     }
-  }, [personId, sourceType, supported, isOpenfeed]);
+    if (isWws) {
+      api<{ connected: boolean; updated_at?: string | null }>(
+        "/api/v1/sources/wws/status",
+      ).then((s) => {
+        setConfigured(s.connected);
+        setUpdatedAt(s.updated_at || null);
+      });
+    }
+  }, [personId, sourceType, supported, isCommBank, isWws]);
 
   if (!supported) {
     return <Navigate to="/account" replace />;
@@ -100,22 +114,69 @@ export function SourceCredentialPage() {
   async function clearCred() {
     if (!personId) return;
     setError("");
-    await api(`/api/v1/people/${personId}/credentials/${sourceType}`, {
+    await api(
+      isWws
+        ? "/api/v1/sources/wws/credential"
+        : `/api/v1/people/${personId}/credentials/${sourceType}`,
+      {
       method: "DELETE",
-    });
+      },
+    );
     setConfigured(false);
     setUpdatedAt(null);
     setGrantId(null);
+    setPairingLink("");
     setMessage("已清除 credential");
   }
 
-  async function connectOpenfeed() {
+  async function createWwsPairing() {
+    setError("");
+    setMessage("");
+    try {
+      const pairing = await api<{
+        pairing_link: string;
+        expires_at: string;
+      }>("/api/v1/sources/wws/pairing", { method: "POST", body: "{}" });
+      setPairingLink(pairing.pairing_link);
+      setPairingExpiresAt(pairing.expires_at);
+      setMessage("绑定码已生成，10 分钟内有效");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "无法生成绑定码");
+    }
+  }
+
+  async function copyWwsPairing() {
+    if (!pairingLink) return;
+    try {
+      await navigator.clipboard.writeText(pairingLink);
+      setMessage("绑定链接已复制；扩展只需临时使用");
+    } catch {
+      setError("复制失败，请手动复制绑定链接");
+    }
+  }
+
+  async function refreshWwsStatus() {
+    setError("");
+    try {
+      const status = await api<{
+        connected: boolean;
+        updated_at?: string | null;
+      }>("/api/v1/sources/wws/status");
+      setConfigured(status.connected);
+      setUpdatedAt(status.updated_at || null);
+      setMessage(status.connected ? "Woolworths 凭证已保存" : "尚未绑定");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "状态刷新失败");
+    }
+  }
+
+  async function connectCommBank() {
     setError("");
     setMessage("");
     setConnecting(true);
     try {
       const res = await api<{ authorize_url: string }>(
-        "/api/v1/sources/openfeed/connect",
+        "/api/v1/sources/commbank/connect",
       );
       window.location.href = res.authorize_url;
     } catch (err) {
@@ -129,17 +190,18 @@ export function SourceCredentialPage() {
     setError("");
     setMessage("");
     setSyncing(true);
+    setSyncProgress({ percent: 0, message: "同步任务已排队…" });
     try {
       const path =
-        sourceType === "openfeed"
-          ? "/api/v1/sources/openfeed/sync"
+        sourceType === "commbank"
+          ? "/api/v1/sources/commbank/sync"
           : "/api/v1/sources/coles/sync";
       const days = Math.min(
         Math.max(Number(lookbackDays) || 90, 1),
         LOOKBACK_MAX,
       );
       const body =
-        sourceType === "openfeed"
+        sourceType === "commbank"
           ? {
               person_id: personId,
               async: true,
@@ -157,26 +219,40 @@ export function SourceCredentialPage() {
 
       if (started.job_id) {
         setMessage("同步任务已排队…");
-        const jobResult = await pollJob(started.job_id);
-        if (jobResult.error) setError(jobResult.error);
-        else {
+        const jobResult = await pollJob(started.job_id, {
+          endpoint: "sources",
+          onProgress: (p) => {
+            setSyncProgress(p);
+            setMessage(p.message || "同步中…");
+          },
+        });
+        if (jobResult.error || jobResult.status === "failed") {
+          setError(jobResult.error || "同步失败");
+        } else {
           const r = jobResult.result || {};
           if (r.error) setError(String(r.error));
           else {
             setMessage(
               `同步完成：导入 ${r.imported ?? 0}，更新 ${r.updated ?? 0}，跳过 ${r.skipped ?? 0}`,
             );
+            setSyncProgress({
+              percent: 100,
+              message: "同步完成",
+            });
           }
         }
       } else if (started.error) {
         setError(started.error);
+        setSyncProgress(null);
       } else {
         setMessage(
           `同步完成：导入 ${started.imported ?? 0}，跳过 ${started.skipped ?? 0}`,
         );
+        setSyncProgress(null);
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "同步失败");
+      setSyncProgress(null);
     } finally {
       setSyncing(false);
     }
@@ -194,7 +270,7 @@ export function SourceCredentialPage() {
             <h1 className="font-display text-3xl text-ink-800">{label}</h1>
             <p className="text-sm text-ink-400">
               {configured
-                ? `已连接${updatedAt ? ` · ${new Date(updatedAt).toLocaleString()}` : ""}`
+                ? `${isWws ? "凭证已保存" : "已连接"}${updatedAt ? ` · ${new Date(updatedAt).toLocaleString()}` : ""}`
                 : "未连接"}
               {grantId ? ` · grant ${grantId.slice(0, 8)}…` : ""}
             </p>
@@ -202,10 +278,10 @@ export function SourceCredentialPage() {
         </div>
       </div>
 
-      {isOpenfeed ? (
+      {isCommBank ? (
         <div className="space-y-5">
           <p className="text-sm text-ink-600">
-            通过 OpenFeed（CDR）授权银行账户。不再使用 BankSync。首次需在 OpenFeed
+            通过 OpenFeed（CDR）授权 CommBank 银行账户。不再使用 BankSync。首次需在 OpenFeed
             登录并勾选要分享的账户。
           </p>
           {!appConfigured && (
@@ -234,14 +310,17 @@ export function SourceCredentialPage() {
           </label>
           {error && <p className="text-sm text-red-700">{error}</p>}
           {message && <p className="text-sm text-ink-600">{message}</p>}
+          {(syncing || syncProgress) && (
+            <JobProgressBar progress={syncProgress} active={syncing} />
+          )}
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
               className="btn-primary"
-              onClick={connectOpenfeed}
+              onClick={connectCommBank}
               disabled={connecting || !appConfigured}
             >
-              {connecting ? "跳转中…" : configured ? "重新授权" : "连接 OpenFeed"}
+              {connecting ? "跳转中…" : configured ? "重新授权" : "连接 CommBank"}
             </button>
             {configured && (
               <>
@@ -260,6 +339,52 @@ export function SourceCredentialPage() {
             )}
           </div>
         </div>
+      ) : isWws ? (
+        <div className="space-y-5">
+          <p className="text-sm text-ink-600">
+            在 Chrome 安装 StarBegonia Woolworths 扩展。从扩展打开 Woolworths 并手动登录，然后生成绑定链接，粘贴到扩展完成绑定。密码只在 Woolworths 页面输入。
+          </p>
+          <p className="text-xs text-ink-400">
+            扩展只读取 pastshops 请求范围内的会话 Cookie；后端加密保存。当前只完成凭证保存，尚未验证拉取订单。绑定链接只在本页内存中保留，刷新页面后需重新生成。
+          </p>
+          {pairingLink && (
+            <label className="block">
+              <span className="mb-1.5 block text-sm text-ink-600">一次性绑定链接</span>
+              <textarea
+                className="field min-h-[5rem] font-mono text-xs"
+                value={pairingLink}
+                readOnly
+                onFocus={(event) => event.currentTarget.select()}
+              />
+              <span className="mt-1 block text-xs text-ink-400">
+                到期时间：
+                {pairingExpiresAt
+                  ? new Date(pairingExpiresAt).toLocaleTimeString()
+                  : ""}
+              </span>
+            </label>
+          )}
+          {error && <p className="text-sm text-red-700">{error}</p>}
+          {message && <p className="text-sm text-ink-600">{message}</p>}
+          <div className="flex flex-wrap gap-3">
+            <button type="button" className="btn-primary" onClick={createWwsPairing}>
+              生成绑定链接
+            </button>
+            {pairingLink && (
+              <button type="button" className="btn-ghost" onClick={copyWwsPairing}>
+                复制链接
+              </button>
+            )}
+            <button type="button" className="btn-ghost" onClick={refreshWwsStatus}>
+              刷新状态
+            </button>
+            {configured && (
+              <button type="button" className="btn-ghost" onClick={clearCred}>
+                断开
+              </button>
+            )}
+          </div>
+        </div>
       ) : (
         <form onSubmit={saveColes} className="space-y-5">
           <label className="block">
@@ -274,6 +399,9 @@ export function SourceCredentialPage() {
           </label>
           {error && <p className="text-sm text-red-700">{error}</p>}
           {message && <p className="text-sm text-ink-600">{message}</p>}
+          {(syncing || syncProgress) && (
+            <JobProgressBar progress={syncProgress} active={syncing} />
+          )}
           <div className="flex flex-wrap gap-3">
             <button type="submit" className="btn-primary">
               保存
@@ -298,22 +426,4 @@ export function SourceCredentialPage() {
       )}
     </div>
   );
-}
-
-async function pollJob(jobId: string): Promise<{
-  error?: string;
-  result?: Record<string, unknown>;
-}> {
-  for (let i = 0; i < 120; i++) {
-    await new Promise((r) => setTimeout(r, 1500));
-    const job = await api<{
-      status: string;
-      error?: string;
-      result?: Record<string, unknown>;
-    }>(`/api/v1/sources/jobs/${jobId}`);
-    if (job.status === "finished" || job.status === "failed") {
-      return { error: job.error, result: job.result };
-    }
-  }
-  return { error: "同步超时，请稍后在流水页查看是否已导入" };
 }

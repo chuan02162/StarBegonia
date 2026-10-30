@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { JobProgressBar } from "../components/JobProgressBar";
 import { SOURCE_LABELS, SourceLogo } from "../components/SourceLogo";
+import { pollJob, type JobProgress } from "../lib/jobs";
 import type { Household, Invite, Person } from "../types";
 
 type SourceInfo = {
@@ -11,7 +13,7 @@ type SourceInfo = {
   implemented: boolean;
 };
 
-const CONNECTABLE = ["coles", "openfeed"];
+const CONNECTABLE = ["coles", "commbank", "wws"];
 
 export function AccountPage() {
   const { user, refresh } = useAuth();
@@ -33,6 +35,10 @@ export function AccountPage() {
   const [jevContext, setJevContext] = useState("");
   const [jevContextMsg, setJevContextMsg] = useState("");
   const [showJevContext, setShowJevContext] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [syncProgress, setSyncProgress] = useState<JobProgress | null>(null);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [jevProgress, setJevProgress] = useState<JobProgress | null>(null);
 
   const loadHousehold = useCallback(async () => {
     const data = await api<{
@@ -152,6 +158,7 @@ export function AccountPage() {
     setBusy(true);
     setError("");
     setJevMsg("排队全量 Jev…");
+    setJevProgress({ percent: 0, message: "排队全量 Jev…" });
     try {
       const res = await api<{
         job_id?: string;
@@ -169,15 +176,112 @@ export function AccountPage() {
         }),
       });
       if (res.job_id) {
-        setJevMsg(`已排队 job ${res.job_id}，后台跑完后分类会更新`);
+        const job = await pollJob(res.job_id, {
+          endpoint: "categories",
+          onProgress: (p) => {
+            setJevProgress(p);
+            setJevMsg(p.message || "Jev 运行中…");
+          },
+        });
+        if (job.error || job.status === "failed") {
+          setError(job.error || "全量 Jev 失败");
+          setJevMsg("");
+        } else {
+          const r = job.result || {};
+          setJevMsg(
+            `已分类 ${Number(r.classified ?? 0)}/${Number(r.requested ?? 0)} 条`,
+          );
+          setJevProgress({
+            percent: 100,
+            current: Number(r.classified ?? 0),
+            total: Number(r.requested ?? 0) || 1,
+            message: "全量 Jev 完成",
+          });
+        }
       } else {
         setJevMsg(`已分类 ${res.classified ?? 0}/${res.requested ?? 0} 条`);
+        setJevProgress(null);
       }
     } catch (err) {
       setJevMsg("");
+      setJevProgress(null);
       setError(err instanceof ApiError ? err.message : "全量 Jev 失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runOverwriteFullSync() {
+    if (
+      !confirm(
+        "将对已连接的数据源做一次覆盖式全量同步，完成后自动去重并识别内部转账。确定？",
+      )
+    ) {
+      return;
+    }
+    setSyncingAll(true);
+    setError("");
+    setSyncMsg("排队覆盖全量同步…");
+    setSyncProgress({ percent: 0, message: "排队覆盖全量同步…" });
+    try {
+      const started = await api<{ job_id?: string; error?: string }>(
+        "/api/v1/sources/full-sync",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            person_id: personId,
+            overwrite: true,
+            full_sync: true,
+            async: true,
+          }),
+        },
+      );
+      if (started.job_id) {
+        const job = await pollJob(started.job_id, {
+          endpoint: "sources",
+          onProgress: (p) => {
+            setSyncProgress(p);
+            setSyncMsg(p.message || "同步中…");
+          },
+        });
+        if (job.error || job.status === "failed") {
+          setError(job.error || "覆盖全量同步失败");
+          setSyncMsg("");
+        } else {
+          const r = job.result || {};
+          const partialErrors =
+            r.errors && typeof r.errors === "object"
+              ? Object.entries(r.errors as Record<string, string>)
+                  .map(([k, v]) => `${k}: ${v}`)
+                  .join("；")
+              : "";
+          if (r.error && !partialErrors) {
+            setError(String(r.error));
+            setSyncMsg("");
+          } else {
+            const sources = Array.isArray(r.sources)
+              ? (r.sources as string[]).join("、")
+              : "";
+            setSyncMsg(
+              `覆盖全量同步完成${sources ? `（${sources}）` : ""}，已运行去重和内部转账识别`,
+            );
+            setSyncProgress({
+              percent: 100,
+              message: "覆盖全量同步完成",
+            });
+            if (partialErrors) setError(`部分失败：${partialErrors}`);
+          }
+        }
+      } else if (started.error) {
+        setError(started.error);
+        setSyncMsg("");
+      }
+    } catch (err) {
+      setSyncMsg("");
+      setSyncProgress(null);
+      setError(err instanceof ApiError ? err.message : "覆盖全量同步失败");
+    } finally {
+      setSyncingAll(false);
     }
   }
 
@@ -269,6 +373,7 @@ export function AccountPage() {
       label: SOURCE_LABELS[type] || type,
       configured: Boolean(cred),
       implemented: meta?.implemented ?? true,
+      supportsSync: meta?.supports_sync ?? false,
     };
   });
 
@@ -388,6 +493,9 @@ export function AccountPage() {
               </div>
             </div>
             {jevMsg && <p className="text-sm text-ink-500">{jevMsg}</p>}
+            {(busy || jevProgress) && (
+              <JobProgressBar progress={jevProgress} active={busy} />
+            )}
 
             {showJevContext && (
               <form
@@ -559,6 +667,23 @@ export function AccountPage() {
       <section className="space-y-4">
         <h2 className="font-display text-xl text-ink-800">数据源</h2>
         <p className="text-sm text-ink-500">连接超市 / 银行等平台，用于同步账单</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            className="btn-primary text-sm"
+            disabled={syncingAll || !platforms.some((p) => p.configured && p.supportsSync)}
+            onClick={runOverwriteFullSync}
+          >
+            {syncingAll ? "覆盖同步中…" : "覆盖全量同步"}
+          </button>
+          <p className="text-xs text-ink-400">
+              对已接入同步的来源全量拉取并覆盖账单，完成后自动去重和识别内部转账
+          </p>
+        </div>
+        {syncMsg && <p className="text-sm text-ink-500">{syncMsg}</p>}
+        {(syncingAll || syncProgress) && (
+          <JobProgressBar progress={syncProgress} active={syncingAll} />
+        )}
         <ul className="divide-y divide-ink-100">
           {platforms.map((p) => (
             <li key={p.type}>
@@ -570,7 +695,11 @@ export function AccountPage() {
                 <div className="min-w-0 flex-1">
                   <p className="text-ink-800">{p.label}</p>
                   <p className="text-sm text-ink-400">
-                    {p.configured ? "已连接" : "未配置"}
+                    {p.configured
+                      ? p.supportsSync
+                        ? "已连接"
+                        : "已绑定（同步待接入）"
+                      : "未配置"}
                   </p>
                 </div>
                 <span className="text-sm text-ink-500">配置 →</span>

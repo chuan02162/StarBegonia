@@ -1,21 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
-
 from app.sources.coles import ColesAdapter
-from app.sources.commbank import CommBankAdapter, _parse_sync_since
-
-
-def test_parse_sync_since_date_and_datetime():
-    assert _parse_sync_since(None) is None
-    d = _parse_sync_since("2026-10-20")
-    assert d is not None
-    assert d.day == 20
-    assert d.tzinfo is not None
-    t = _parse_sync_since("2026-10-28T18:03:33.36Z")
-    assert t is not None
-    assert t.hour == 18
 
 
 def test_coles_incremental_stops_before_watermark(monkeypatch):
@@ -84,46 +69,5 @@ def test_coles_incremental_stops_before_watermark(monkeypatch):
     )
     assert raw.data["incremental"] is True
     assert raw.data["detailed"] == 2
-    assert detailed == ["1", "2"]
+    assert set(detailed) == {"1", "2"}
     assert raw.data["listed"] == 3  # scanned until watermark hit on page 2
-
-
-def test_commbank_uses_since_as_from(monkeypatch):
-    adapter = CommBankAdapter()
-    calls: list[dict] = []
-
-    class FakeClient:
-        def resolve_commbank(self, bank_id):
-            return {"id": "fiskil_2", "name": "CommBank"}
-
-        def list_accounts(self, bank_id):
-            return [
-                {
-                    "id": "acc1",
-                    "accountName": "Smart Access",
-                    "accountNumber": "11070639",
-                }
-            ]
-
-        def list_transactions(self, bank_id, account_id, *, from_date, to_date, cursor=None):
-            calls.append({"from": from_date, "to": to_date, "cursor": cursor})
-            return {"data": [], "meta": {"hasMore": False}}
-
-    monkeypatch.setattr(
-        "app.sources.commbank._resolve_api_key", lambda cred: "key"
-    )
-    monkeypatch.setattr(
-        "app.sources.commbank._BankSyncClient", lambda key: FakeClient()
-    )
-
-    raw = adapter.fetch_raw(
-        {
-            "account_numbers": ["11070639"],
-            "incremental": True,
-            "since": "2026-10-26T05:05:15",
-            "lookback_days": 90,
-        }
-    )
-    assert raw.data["incremental"] is True
-    assert raw.data["from"] == "2026-10-26"
-    assert calls and calls[0]["from"] == "2026-10-26"

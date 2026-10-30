@@ -8,20 +8,28 @@ import type { BillSummary, DedupLink } from "../types";
 function BillCard({
   bill,
   role,
+  clickable = true,
 }: {
   bill: BillSummary | null;
   role: string;
+  clickable?: boolean;
 }) {
   if (!bill) return null;
   return (
     <div className="min-w-0 flex-1 space-y-1">
       <p className="text-xs uppercase tracking-wide text-ink-400">{role}</p>
-      <Link
-        to={`/bills/${bill.id}`}
-        className="font-medium text-ink-800 hover:underline"
-      >
-        {bill.merchant || `账单 #${bill.id}`}
-      </Link>
+      {clickable ? (
+        <Link
+          to={`/bills/${bill.id}`}
+          className="font-medium text-ink-800 hover:underline"
+        >
+          {bill.merchant || `账单 #${bill.id}`}
+        </Link>
+      ) : (
+        <p className="font-medium text-ink-800">
+          {bill.merchant || `账单 #${bill.id}`}
+        </p>
+      )}
       <p className="flex flex-wrap items-center gap-2 text-sm text-ink-500">
         <SourceLogo source={bill.source_type} className="h-5 w-5" />
         {SOURCE_LABELS[bill.source_type] || bill.source_type}
@@ -53,7 +61,7 @@ export function DedupPage() {
   }, [load]);
 
   async function unlink(linkId: number) {
-    if (!window.confirm("取消这对去重？双方会重新计入概览与结算。")) return;
+    if (!window.confirm("取消这对去重？CommBank 记录会重新出现在流水、概览与结算。")) return;
     setBusy(true);
     setError("");
     try {
@@ -81,8 +89,8 @@ export function DedupPage() {
         </p>
         <h1 className="mt-2 font-display text-3xl text-ink-800">已去重账单对</h1>
         <p className="mt-2 max-w-xl text-ink-500">
-          同步后按金额与时间自动配对（Coles / 手动 ↔ CommBank）。从记录不再计入概览与
-          AA 结算。
+          同步后按金额与时间自动配对（Coles / 手动 ↔ CommBank）。从记录只在此处显示，
+          不会出现在流水、概览或 AA 结算中。
         </p>
       </div>
 
@@ -93,7 +101,11 @@ export function DedupPage() {
           <li key={link.id} className="space-y-4 py-5">
             <div className="flex flex-wrap gap-6">
               <BillCard bill={link.primary_bill} role="主记录" />
-              <BillCard bill={link.secondary_bill} role="从记录" />
+              <BillCard
+                bill={link.secondary_bill}
+                role="从记录"
+                clickable={false}
+              />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
               <p className="text-ink-500">

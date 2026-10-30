@@ -84,10 +84,7 @@ def overview(
     current_start, current_end = _period_bounds(granularity)
 
     visible_bills = household_service.visible_bills_query(viewer_person_id).all()
-    # Skip cross-source dedup secondaries (bank side of a confirmed link)
-    visible_ids = [
-        b.id for b in visible_bills if not b.dedup_primary_id
-    ]
+    visible_ids = [b.id for b in visible_bills]
     if not visible_ids:
         rows = []
     else:

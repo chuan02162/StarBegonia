@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api } from "../api/client";
 import { CategoryChip, CategoryPicker } from "../components/CategoryPicker";
+import { JobProgressBar } from "../components/JobProgressBar";
 import { SourceLogo } from "../components/SourceLogo";
 import { formatMoney, formatOccurredAt } from "../lib/format";
+import { pollJob, type JobProgress } from "../lib/jobs";
 import type { CategoryItem, PendingEntry, Vocabulary } from "../types";
 
 export function CategoriesPage() {
@@ -13,6 +15,8 @@ export function CategoriesPage() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [pickerEntry, setPickerEntry] = useState<PendingEntry | null>(null);
   const [batchMsg, setBatchMsg] = useState("");
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<JobProgress | null>(null);
 
   const load = useCallback(() => {
     return Promise.all([
@@ -75,6 +79,8 @@ export function CategoriesPage() {
   async function runBatch() {
     setBatchMsg("排队分类中…");
     setError("");
+    setBatchRunning(true);
+    setBatchProgress({ percent: 0, message: "排队分类中…" });
     try {
       const res = await api<{ job_id?: string; classified?: number; status?: string }>(
         "/api/v1/categories/classify",
@@ -89,14 +95,38 @@ export function CategoriesPage() {
         },
       );
       if (res.job_id) {
-        setBatchMsg(`已排队 job ${res.job_id}，稍后刷新`);
+        const job = await pollJob(res.job_id, {
+          endpoint: "categories",
+          onProgress: (p) => {
+            setBatchProgress(p);
+            setBatchMsg(p.message || "分类中…");
+          },
+        });
+        if (job.error || job.status === "failed") {
+          setError(job.error || "批量分类失败");
+          setBatchMsg("");
+        } else {
+          const classified = Number(job.result?.classified ?? 0);
+          setBatchMsg(`已分类 ${classified} 条`);
+          setBatchProgress({
+            percent: 100,
+            message: "分类完成",
+            current: classified,
+            total: Number(job.result?.requested ?? classified) || 1,
+          });
+          await load();
+        }
       } else {
         setBatchMsg(`已分类 ${res.classified ?? 0} 条`);
+        setBatchProgress(null);
         await load();
       }
     } catch (err) {
       setBatchMsg("");
+      setBatchProgress(null);
       setError(err instanceof ApiError ? err.message : "批量分类失败");
+    } finally {
+      setBatchRunning(false);
     }
   }
 
@@ -112,12 +142,20 @@ export function CategoriesPage() {
             Jev 低置信度建议；点分类可改选，右侧绿色对号确认当前建议
           </p>
         </div>
-        <button type="button" className="btn-ghost" onClick={runBatch}>
-          对未分类条目跑 Jev
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={runBatch}
+          disabled={batchRunning || pending.length === 0}
+        >
+          {batchRunning ? "分类中…" : "对未分类条目跑 Jev"}
         </button>
       </div>
 
       {batchMsg && <p className="text-sm text-ink-500">{batchMsg}</p>}
+      {(batchRunning || batchProgress) && (
+        <JobProgressBar progress={batchProgress} active={batchRunning} />
+      )}
       {error && <p className="text-sm text-red-700">{error}</p>}
 
       <ul className="divide-y divide-ink-100">

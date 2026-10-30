@@ -47,4 +47,4 @@ OPENFEED_DPOP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KE
 2. 登录 OpenFeed → 勾选要分享的银行账户
 3. 回到站点后点 **同步账单**
 
-旧 BankSync / `commbank` 流水仍保留在库里，新同步写入 `openfeed`。
+升级到此版本时，旧 BankSync `commbank` 凭证和账单会删除；现有 `openfeed` 凭证与账单会迁移为 `commbank`。之后连接和同步统一显示为 CommBank。OAuth 回调路径仍使用 `/openfeed/...`，以匹配已注册的 OpenFeed 应用配置。
