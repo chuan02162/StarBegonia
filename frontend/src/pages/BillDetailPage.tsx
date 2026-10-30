@@ -165,12 +165,15 @@ function EntryRow({
   const pending = entry.classification_status === "pending";
 
   const income = isIncomeCategory(entry.category_id);
+  const thumbSrc = isFlybuysEntry(entry.name)
+    ? "/flybuys.png"
+    : entry.image_url;
 
   return (
     <li className="py-5">
       <div className="flex items-start gap-3 sm:items-center sm:gap-5">
         <ProductThumb
-          src={entry.image_url}
+          src={thumbSrc}
           alt={entry.name}
           categoryId={entry.category_id}
         />
@@ -209,6 +212,10 @@ function EntryRow({
   );
 }
 
+function isFlybuysEntry(name: string): boolean {
+  return /^flybuys/i.test(name.trim()) || /flybuys\s*优惠/i.test(name);
+}
+
 function ProductThumb({
   src,
   alt,
@@ -221,7 +228,7 @@ function ProductThumb({
   return (
     <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-ink-50 ring-1 ring-ink-100 sm:h-28 sm:w-28">
       {src ? (
-        <img src={src} alt={alt} className="h-full w-full object-contain" loading="lazy" />
+        <img src={src} alt={alt} className="h-full w-full object-contain p-1.5" loading="lazy" />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-ink-400">
           <CategoryIcon id={categoryId} className="h-8 w-8 sm:h-10 sm:w-10" />

@@ -73,6 +73,20 @@ export type DedupLink = {
   secondary_bill: BillSummary | null;
 };
 
+export type InternalTransferLink = {
+  id: number;
+  household_id: number;
+  outgoing_bill_id: number;
+  incoming_bill_id: number;
+  reference: string;
+  status: "linked" | string;
+  previous_categories: Record<string, string | null>;
+  matched_at: string;
+  created_at: string;
+  outgoing_bill: BillSummary | null;
+  incoming_bill: BillSummary | null;
+};
+
 export type Invite = {
   id: number;
   code: string;

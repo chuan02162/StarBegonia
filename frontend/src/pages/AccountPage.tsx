@@ -293,6 +293,9 @@ export function AccountPage() {
                 <Link to="/dedup" className="btn-ghost text-sm">
                   查看去重账单
                 </Link>
+                <Link to="/transfers" className="btn-ghost text-sm">
+                  查看内部账单
+                </Link>
                 <button
                   type="button"
                   className="btn-ghost text-sm"

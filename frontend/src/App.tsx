@@ -9,6 +9,7 @@ import { BillsPage } from "./pages/BillsPage";
 import { BootstrapPage } from "./pages/BootstrapPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { DedupPage } from "./pages/DedupPage";
+import { InternalTransfersPage } from "./pages/InternalTransfersPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NewBillPage } from "./pages/NewBillPage";
 import { OverviewPage } from "./pages/OverviewPage";
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="settlements" element={<SettlementsPage />} />
         <Route path="settlements/:settlementId/entries" element={<SettlementLinesPage />} />
         <Route path="dedup" element={<DedupPage />} />
+        <Route path="transfers" element={<InternalTransfersPage />} />
         <Route path="account" element={<AccountPage />} />
         <Route path="account/sources/:sourceType" element={<SourceCredentialPage />} />
         <Route path="people" element={<Navigate to="/account" replace />} />

@@ -272,6 +272,15 @@ def _persist_drafts(
         except Exception:
             dedup_scan = None
 
+    transfer_scan = None
+    if source_type == "commbank":
+        try:
+            from app.services import internal_transfers as transfer_service
+
+            transfer_scan = transfer_service.scan_household(household_id)
+        except Exception:
+            transfer_scan = None
+
     return {
         "source_type": source_type,
         "person_id": person_id,
@@ -282,6 +291,7 @@ def _persist_drafts(
         "classify_job_id": classify_job_id,
         "classify_queued": len(classify_ids) if classify_ids else 0,
         "dedup_scan": dedup_scan,
+        "transfer_scan": transfer_scan,
     }
 
 

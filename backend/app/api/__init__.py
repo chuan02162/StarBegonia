@@ -12,6 +12,7 @@ from app.api import (
     people,
     settlements,
     sources,
+    transfers,
 )
 
 
@@ -28,4 +29,5 @@ def register_blueprints(app) -> None:
     api.register_blueprint(aa_rules.bp, url_prefix="/aa-rules")
     api.register_blueprint(settlements.bp, url_prefix="/settlements")
     api.register_blueprint(dedup.bp, url_prefix="/dedup")
+    api.register_blueprint(transfers.bp, url_prefix="/transfers")
     app.register_blueprint(api)
