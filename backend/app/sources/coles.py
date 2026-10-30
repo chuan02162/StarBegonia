@@ -294,8 +294,14 @@ def _parse_order(order: dict[str, Any]) -> BillDraft | None:
     if not entries:
         if order_total is None:
             return None
+        paid = _dec(order_total)
         entries.append(
-            EntryDraft(name="Order total", amount=_dec(order_total), quantity=Decimal("1"))
+            EntryDraft(
+                name="Order total",
+                amount=-abs(paid),
+                quantity=Decimal("1"),
+                unit_price=-abs(paid),
+            )
         )
     elif order_total is not None:
         # Line items are pre-tender; orderTotalPrice is what was actually paid
@@ -318,8 +324,10 @@ def _append_tender_adjustment(
     paid: Decimal,
     attrs: dict[str, Any],
 ) -> None:
-    line_sum = sum((e.amount for e in entries), Decimal("0"))
-    diff = (line_sum - paid).quantize(Decimal("0.01"))
+    # entries are signed (negative spend). Compare magnitude to paid.
+    line_sum_abs = sum((abs(e.amount) for e in entries), Decimal("0"))
+    paid_abs = abs(paid)
+    diff = (line_sum_abs - paid_abs).quantize(Decimal("0.01"))
     if abs(diff) < Decimal("0.01"):
         return
     # Prefer Flybuys label when card was presented or API names a redemption.
@@ -330,10 +338,12 @@ def _append_tender_adjustment(
     )
     if diff > 0:
         name = "Flybuys 优惠" if has_flybuys else "结账优惠"
-        amount = -diff
+        # Credit toward the bill (reduces net outflow)
+        amount = diff
     else:
         name = "结账调整"
-        amount = -diff  # paid more than lines → positive extra
+        # Extra charged beyond lines → more outflow
+        amount = diff  # negative
     entries.append(
         EntryDraft(
             name=name,
@@ -342,7 +352,7 @@ def _append_tender_adjustment(
             unit_price=amount,
             currency="AUD",
             category_id="other",
-            note=f"orderTotalPrice={paid}; lineSum={line_sum}",
+            note=f"orderTotalPrice={paid}; lineSum={line_sum_abs}",
         )
     )
 
@@ -361,11 +371,14 @@ def _parse_item(item: dict[str, Any]) -> EntryDraft | None:
         notes.append(f"brand={item.get('brand')}")
     if item.get("id") is not None:
         notes.append(f"productId={item.get('id')}")
+    # Signed amounts: grocery spend is money out (negative).
+    signed = -abs(amount) if amount != 0 else Decimal("0")
+    signed_unit = -abs(unit) if unit is not None else None
     return EntryDraft(
         name=name[:255],
-        amount=amount,
+        amount=signed,
         quantity=qty,
-        unit_price=unit,
+        unit_price=signed_unit,
         discount=saving,
         currency="AUD",
         note="; ".join(notes) if notes else None,

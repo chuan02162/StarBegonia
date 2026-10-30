@@ -276,12 +276,13 @@ def _txn_to_draft(txn: dict[str, Any]) -> BillDraft | None:
     if account.get("accountId"):
         note_parts.append(f"account_id={account.get('accountId')}")
 
-    abs_amount = abs(signed)
+    # Keep bank sign: positive = money in, negative = money out.
+    # Category (Jev) is separate from income/expense polarity.
     entry = EntryDraft(
         name=title[:255],
-        amount=abs_amount,
+        amount=signed,
         quantity=Decimal("1"),
-        unit_price=abs_amount,
+        unit_price=signed,
         currency=currency,
         category_id=None,
         note=None,

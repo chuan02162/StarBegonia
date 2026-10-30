@@ -14,8 +14,8 @@ from app.services.categories import get_vocabulary
 
 Granularity = Literal["week", "month", "quarter", "year"]
 
-# Categories treated as income (positive inflow); transfer excluded from expense/income totals
-# Include legacy ids still present on old rows until full Jev reclassify.
+# Legacy helpers — polarity is amount sign (positive = in, negative = out).
+# Kept for internal-transfer heuristics / settlements filters.
 INCOME_IDS = {"salary", "interest", "income", "income_other"}
 EXCLUDE_IDS = {"transfer"}
 
@@ -132,24 +132,28 @@ def overview(
 
     for entry, bill in rows:
         amount = Decimal(entry.amount or 0)
-        cat = entry.category_id or "other"
-        if cat in EXCLUDE_IDS:
+        if amount == 0:
             continue
+        cat = entry.category_id or "other"
         bi = bucket_index(bill.occurred_at)
         if bi is None:
             continue
         in_current = current_start <= bill.occurred_at < current_end
 
-        if cat in INCOME_IDS:
+        # Polarity from amount sign; Jev category is orthogonal.
+        if amount > 0:
             income_by_bucket[bi] += amount
             if in_current:
                 current_income += amount
         else:
-            expense_by_bucket[bi] += amount
+            exp = abs(amount)
+            expense_by_bucket[bi] += exp
             if in_current:
-                current_expense += amount
-                by_category[cat] += amount
-                by_source[bill.source_type or "unknown"] += amount
+                current_expense += exp
+                # Skip transfer in category pie (internal / 不计收支 label)
+                if cat not in EXCLUDE_IDS:
+                    by_category[cat] += exp
+                    by_source[bill.source_type or "unknown"] += exp
 
     series = []
     for i, s in enumerate(starts):

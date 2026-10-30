@@ -9,7 +9,7 @@ from app.extensions import db
 from app.models import Bill, Entry, HouseholdMembership, Person, Settlement
 from app.services import aa_rules as aa_service
 from app.services.aa_rules import AaRuleError, require_household
-from app.services.analytics import EXCLUDE_IDS, INCOME_IDS, _period_bounds
+from app.services.analytics import EXCLUDE_IDS, _period_bounds
 
 Granularity = Literal["week", "month", "quarter", "year"]
 STATUS_DRAFT = "draft"
@@ -97,11 +97,13 @@ def compute_settlement_result(
         payer_name = names.get(payer_id, f"#{payer_id}")
         for entry in bill.entries:
             cat = entry.category_id or "other"
-            if cat in INCOME_IDS or cat in EXCLUDE_IDS:
+            if cat in EXCLUDE_IDS:
                 continue
-            amount = Decimal(str(entry.amount or 0))
-            if amount == 0:
+            raw_amount = Decimal(str(entry.amount or 0))
+            # AA only on money-out (negative). Credits/income skipped by sign.
+            if raw_amount >= 0:
                 continue
+            amount = abs(raw_amount)
 
             base_line = {
                 "entry_id": entry.id,

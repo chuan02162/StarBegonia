@@ -43,7 +43,7 @@ def parse_txn_type(note: str | None) -> str | None:
 
 
 def bill_direction(bill: Bill) -> Direction:
-    """Infer credit vs debit for CommBank bills stored as absolute amounts."""
+    """Infer credit vs debit — note type, then signed amount, then category."""
     txn_type = parse_txn_type(bill.note) or ""
     if txn_type in {
         "TRANSFER_INCOMING",
@@ -58,6 +58,12 @@ def bill_direction(bill: Bill) -> Direction:
         "DEBIT",
         "WITHDRAWAL",
     }:
+        return "out"
+
+    total = Decimal(str(bill.total_amount or 0))
+    if total > 0:
+        return "in"
+    if total < 0:
         return "out"
 
     # Fallback: entry categories

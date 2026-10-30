@@ -255,8 +255,7 @@ def _txn_to_draft(txn: dict[str, Any]) -> BillDraft | None:
     if signed == 0:
         return None
 
-    abs_amount = abs(signed)
-
+    # Keep bank sign: positive = money in, negative = money out.
     # BankSync exposes CDR postingDateTime as providerPostingDateTime (RFC3339).
     # `date` / `authorizedDate` are date-only fallbacks.
     occurred = _parse_date(
@@ -298,9 +297,9 @@ def _txn_to_draft(txn: dict[str, Any]) -> BillDraft | None:
     # stay in note as banksync_category=… for debugging only.
     entry = EntryDraft(
         name=title[:255],
-        amount=abs_amount,
+        amount=signed,
         quantity=Decimal("1"),
-        unit_price=abs_amount,
+        unit_price=signed,
         currency=currency,
         category_id=None,
         note=None,

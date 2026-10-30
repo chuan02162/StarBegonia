@@ -203,11 +203,11 @@ export function BillsPage() {
               </div>
               <p
                 className={`shrink-0 font-medium tabular-nums ${moneyClass(
-                  billLooksLikeIncome(b.entries),
+                  billLooksLikeIncome(b.entries, b.total_amount),
                 )}`}
               >
                 {formatMoneySigned(b.total_amount, b.currency, {
-                  income: billLooksLikeIncome(b.entries),
+                  income: billLooksLikeIncome(b.entries, b.total_amount),
                 })}
               </p>
             </Link>

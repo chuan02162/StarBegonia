@@ -239,7 +239,14 @@ def _build_entry(bill: Bill, raw: dict[str, Any]) -> Entry:
     if isinstance(category_id, str):
         category_id = category_id.strip() or None
 
+    # Manual UI enters magnitudes; store signed amounts (out -, in +).
+    from app.services.analytics import INCOME_IDS
     from app.services.classify import STATUS_CONFIRMED, STATUS_UNCLASSIFIED
+
+    if amount > 0 and (category_id or "") not in INCOME_IDS:
+        amount = -amount
+        if unit_price is not None and unit_price > 0:
+            unit_price = -unit_price
 
     entry = Entry(
         bill_id=bill.id,

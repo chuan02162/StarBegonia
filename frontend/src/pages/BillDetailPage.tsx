@@ -9,7 +9,7 @@ import {
   formatEntryQty,
   formatMoneySigned,
   formatOccurredAt,
-  isIncomeCategory,
+  isIncomeAmount,
   moneyClass,
 } from "../lib/format";
 import type { Bill, CategoryItem, Entry, Vocabulary } from "../types";
@@ -80,11 +80,11 @@ export function BillDetailPage() {
         <div className="text-right">
           <p
             className={`font-display text-3xl tabular-nums ${moneyClass(
-              billLooksLikeIncome(bill.entries),
+              billLooksLikeIncome(bill.entries, bill.total_amount),
             )}`}
           >
             {formatMoneySigned(bill.total_amount, bill.currency, {
-              income: billLooksLikeIncome(bill.entries),
+              income: billLooksLikeIncome(bill.entries, bill.total_amount),
             })}
           </p>
           {bill.source_type === "manual" && (
@@ -164,7 +164,7 @@ function EntryRow({
     : "未分类";
   const pending = entry.classification_status === "pending";
 
-  const income = isIncomeCategory(entry.category_id);
+  const income = isIncomeAmount(entry.amount);
   const thumbSrc = isFlybuysEntry(entry.name)
     ? "/flybuys.png"
     : entry.image_url;

@@ -59,7 +59,7 @@ def test_parse_bank_transactions():
     assert expense.external_id == "banksync:txn_1"
     assert expense.merchant == "Woolworths"
     assert expense.entries[0].name == "Woolworths Surry Hills"
-    assert expense.entries[0].amount == Decimal("84.20")
+    assert expense.entries[0].amount == Decimal("-84.20")
     assert expense.entries[0].category_id is None
 
     income = drafts[1]

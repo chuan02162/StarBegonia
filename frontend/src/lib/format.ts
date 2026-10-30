@@ -58,38 +58,39 @@ export function formatOccurredAt(iso: string | null | undefined): string {
   });
 }
 
-/** Income category ids — keep in sync with config/categories.yaml + analytics.INCOME_IDS */
-export const INCOME_CATEGORY_IDS = new Set([
-  "salary",
-  "interest",
-  // Legacy ids until rows are reclassified
-  "income",
-  "income_other",
-]);
-
-export function isIncomeCategory(categoryId?: string | null): boolean {
-  return Boolean(categoryId && INCOME_CATEGORY_IDS.has(categoryId));
+/** Money-in when amount &gt; 0 (bank sign). Category is separate (Jev). */
+export function isIncomeAmount(amount?: string | number | null): boolean {
+  const n = Number(amount);
+  return Number.isFinite(n) && n > 0;
 }
 
-/** Bill is income when every entry with a category is income (or sole entry is income). */
+/** Bill is income when net total &gt; 0. */
 export function billLooksLikeIncome(
-  entries: { category_id?: string | null }[] | undefined,
+  entries: { amount?: string | number | null }[] | undefined,
+  totalAmount?: string | number | null,
 ): boolean {
+  if (totalAmount != null && totalAmount !== "") {
+    return isIncomeAmount(totalAmount);
+  }
   if (!entries?.length) return false;
-  const withCat = entries.filter((e) => e.category_id);
-  if (withCat.length === 0) return false;
-  return withCat.every((e) => isIncomeCategory(e.category_id));
+  const sum = entries.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+  return sum > 0;
 }
 
 export function moneyClass(isIncome: boolean): string {
   return isIncome ? "text-emerald-700" : "text-ink-800";
 }
 
+/** Show signed money: +$x for credits, -$x for debits (abs formatting + sign). */
 export function formatMoneySigned(
   amount: string | number,
   currency = "AUD",
-  opts: { income: boolean },
+  opts?: { income?: boolean },
 ): string {
-  const base = formatMoney(amount, currency);
-  return opts.income ? `+${base}` : base;
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return String(amount);
+  const income = opts?.income ?? n > 0;
+  const base = formatMoney(Math.abs(n), currency);
+  if (n === 0) return base;
+  return income ? `+${base}` : `-${base}`;
 }

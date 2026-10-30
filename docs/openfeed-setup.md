@@ -5,8 +5,8 @@
 ```
 APP_PUBLIC_URL=http://1cchome1.duckdns.org:5173
 OPENFEED_ISSUER=https://auth.openfeed.au
-OPENFEED_CLIENT_ID=          # 注册后填 oauth2ClientId（app-…）
-OPENFEED_APP_ID=             # 注册后填裸 UUID
+OPENFEED_CLIENT_ID=app-1d75015d-ee9a-4a70-bcb2-c1171efacf9e
+OPENFEED_APP_ID=1d75015d-ee9a-4a70-bcb2-c1171efacf9e
 OPENFEED_APP_KID=oUwJB8npRTHFW2Tb
 OPENFEED_DPOP_KID=um3Ub-PMV_jVYLLo
 OPENFEED_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----"
