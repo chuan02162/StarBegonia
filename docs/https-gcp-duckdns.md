@@ -53,23 +53,20 @@ CORS_ORIGINS=https://1cchome1.duckdns.org
 
 ## 4. Deploy the HTTPS stack
 
-Install `rsync` on the VM if needed (`sudo apt install -y rsync`) and confirm
-SSH access from your development machine. Run this from the local project root,
-replacing `SSH_USER` with your VM login:
+Make sure the updated project files are present in the VM checkout, then SSH
+into the VM and run this from the project root:
 
 ```bash
-./scripts/deploy-gcp.sh SSH_USER@1cchome1.duckdns.org
+./scripts/deploy-gcp.sh
 ```
 
-The script syncs project files and removes stale code files from the remote
-project directory. It excludes `.env` and secret files, then builds and starts
-the HTTPS stack remotely. Use a dedicated project directory. The script
-requires an existing `~/StarBegonia/.env` and checks its HTTPS origin before
-deploying. Caddy obtains and renews the certificate automatically; its data is
-stored in the `caddy_data` volume. To inspect Caddy logs, run:
+The script checks the VM's production `.env` and Docker access, then builds and
+starts the HTTPS stack. It never copies or overwrites `.env`. Caddy obtains and
+renews the certificate automatically; its data is stored in the `caddy_data`
+volume. To inspect Caddy logs later, run:
 
 ```bash
-ssh SSH_USER@1cchome1.duckdns.org 'cd StarBegonia && docker compose -f docker-compose.yml -f docker-compose.https.yml logs --tail=100 caddy'
+docker compose -f docker-compose.yml -f docker-compose.https.yml logs --tail=100 caddy
 ```
 
 Once `https://1cchome1.duckdns.org/account` loads, remove the old public GCP
