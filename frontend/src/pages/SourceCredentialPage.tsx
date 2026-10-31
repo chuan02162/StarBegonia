@@ -5,35 +5,42 @@ import { useAuth } from "../auth/AuthContext";
 import { JobProgressBar } from "../components/JobProgressBar";
 import { SOURCE_LABELS, SourceLogo } from "../components/SourceLogo";
 import { pollJob, type JobProgress } from "../lib/jobs";
+import {
+  refreshSourceStatus,
+  setSourceConnected,
+  useSourceStatus,
+} from "../lib/sourceStatus";
 
 const SUPPORTED = new Set(["coles", "commbank", "wws"]);
+
+const WWS_EXTENSION_ID = "knppbagkjkgnbfjikkfcadpdmpinkfic";
+const MY_ACTIVITY_URL =
+  "https://www.everyday.com.au/content/everyday/en/home/MyAccount/my-activity.html";
 
 export function SourceCredentialPage() {
   const { sourceType = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const personId = user?.person?.id;
-  const [configured, setConfigured] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<JobProgress | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [showFullSync, setShowFullSync] = useState(false);
+  const sourceStatus = useSourceStatus();
 
   const [refreshToken, setRefreshToken] = useState("");
-  const [lookbackDays, setLookbackDays] = useState("90");
-  const LOOKBACK_MAX = 730;
   const [jwksUri, setJwksUri] = useState("");
   const [grantId, setGrantId] = useState<string | null>(null);
   const [appConfigured, setAppConfigured] = useState(true);
-  const [pairingLink, setPairingLink] = useState("");
-  const [pairingExpiresAt, setPairingExpiresAt] = useState<string | null>(null);
 
   const supported = SUPPORTED.has(sourceType);
   const label = SOURCE_LABELS[sourceType] || sourceType;
   const isCommBank = sourceType === "commbank";
   const isWws = sourceType === "wws";
+  const connected = sourceStatus[sourceType];
 
   useEffect(() => {
     const connected = searchParams.get("connected");
@@ -57,7 +64,6 @@ export function SourceCredentialPage() {
       `/api/v1/people/${personId}`,
     ).then((d) => {
       const cred = d.person.credentials?.find((c) => c.source_type === sourceType);
-      setConfigured(Boolean(cred));
       setUpdatedAt(cred?.updated_at ?? null);
     });
     if (isCommBank) {
@@ -69,21 +75,12 @@ export function SourceCredentialPage() {
         jwks_uri?: string;
       }>("/api/v1/sources/commbank/status").then((s) => {
         setAppConfigured(s.app_configured);
-        setConfigured(s.connected);
         setGrantId(s.grant_id || null);
-        if (s.lookback_days) setLookbackDays(String(s.lookback_days));
         if (s.jwks_uri) setJwksUri(s.jwks_uri);
       });
     }
-    if (isWws) {
-      api<{ connected: boolean; updated_at?: string | null }>(
-        "/api/v1/sources/wws/status",
-      ).then((s) => {
-        setConfigured(s.connected);
-        setUpdatedAt(s.updated_at || null);
-      });
-    }
-  }, [personId, sourceType, supported, isCommBank, isWws]);
+    refreshSourceStatus().catch(() => undefined);
+  }, [personId, sourceType, supported, isCommBank]);
 
   if (!supported) {
     return <Navigate to="/account" replace />;
@@ -103,7 +100,7 @@ export function SourceCredentialPage() {
         }),
       });
       setRefreshToken("");
-      setConfigured(true);
+      setSourceConnected("coles", true);
       setUpdatedAt(new Date().toISOString());
       setMessage("已保存");
     } catch (err) {
@@ -122,51 +119,74 @@ export function SourceCredentialPage() {
       method: "DELETE",
       },
     );
-    setConfigured(false);
+    setSourceConnected(sourceType, false);
     setUpdatedAt(null);
     setGrantId(null);
-    setPairingLink("");
     setMessage("已清除 credential");
   }
 
-  async function createWwsPairing() {
+  async function pollWwsToken(
+    timeoutMs: number,
+  ): Promise<{ token: string; userAgent: string } | null> {
+    const deadline = Date.now() + timeoutMs;
+    const chromeRuntime = (window as unknown as {
+      chrome?: { runtime?: { sendMessage?: (id: string, msg: unknown) => Promise<unknown> } };
+    }).chrome?.runtime;
+    if (!chromeRuntime?.sendMessage) return null;
+    while (Date.now() < deadline) {
+      try {
+        const res = (await chromeRuntime.sendMessage(WWS_EXTENSION_ID, {
+          type: "GET_REWARDS_TOKEN",
+        })) as { token?: string; userAgent?: string } | undefined;
+        if (res && typeof res.token === "string" && res.token) {
+          return {
+            token: res.token,
+            userAgent:
+              typeof res.userAgent === "string" && res.userAgent
+                ? res.userAgent
+                : navigator.userAgent,
+          };
+        }
+      } catch {
+        // Extension not installed or not ready yet; keep polling.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    return null;
+  }
+
+  async function connectWws() {
+    if (!personId) return;
     setError("");
     setMessage("");
+    setConnecting(true);
     try {
-      const pairing = await api<{
-        pairing_link: string;
-        expires_at: string;
-      }>("/api/v1/sources/wws/pairing", { method: "POST", body: "{}" });
-      setPairingLink(pairing.pairing_link);
-      setPairingExpiresAt(pairing.expires_at);
-      setMessage("绑定码已生成，10 分钟内有效");
+      window.open(MY_ACTIVITY_URL, "_blank", "noopener");
+      setMessage("已打开 Everyday Rewards「我的活动」，请在登录后等待页面加载…");
+      const session = await pollWwsToken(180_000);
+      if (!session) {
+        setError(
+          "没有读取到 Everyday Rewards 会话。请确认已安装扩展，并在打开的页面里登录 Everyday Rewards。",
+        );
+        return;
+      }
+      await api(`/api/v1/people/${personId}/credentials/wws`, {
+        method: "PUT",
+        body: JSON.stringify({
+          label: "Woolworths",
+          payload: {
+            user_agent: session.userAgent,
+            rewards_authorization: `Bearer ${session.token}`,
+          },
+        }),
+      });
+      setSourceConnected("wws", true);
+      setUpdatedAt(new Date().toISOString());
+      setMessage("Everyday Rewards 已连接");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "无法生成绑定码");
-    }
-  }
-
-  async function copyWwsPairing() {
-    if (!pairingLink) return;
-    try {
-      await navigator.clipboard.writeText(pairingLink);
-      setMessage("绑定链接已复制；扩展只需临时使用");
-    } catch {
-      setError("复制失败，请手动复制绑定链接");
-    }
-  }
-
-  async function refreshWwsStatus() {
-    setError("");
-    try {
-      const status = await api<{
-        connected: boolean;
-        updated_at?: string | null;
-      }>("/api/v1/sources/wws/status");
-      setConfigured(status.connected);
-      setUpdatedAt(status.updated_at || null);
-      setMessage(status.connected ? "Woolworths 凭证已保存" : "尚未绑定");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "状态刷新失败");
+      setError(err instanceof ApiError ? err.message : "连接失败");
+    } finally {
+      setConnecting(false);
     }
   }
 
@@ -185,34 +205,33 @@ export function SourceCredentialPage() {
     }
   }
 
-  async function sync() {
+  async function sync(fullSync = false) {
     if (!personId) return;
     setError("");
     setMessage("");
     setSyncing(true);
-    setSyncProgress({ percent: 0, message: "同步任务已排队…" });
+    setSyncProgress({
+      percent: 0,
+      message: fullSync ? "全量同步任务已排队…" : "增量同步任务已排队…",
+    });
     try {
       const path =
         sourceType === "commbank"
           ? "/api/v1/sources/commbank/sync"
-          : "/api/v1/sources/coles/sync";
-      const days = Math.min(
-        Math.max(Number(lookbackDays) || 90, 1),
-        LOOKBACK_MAX,
-      );
-      const body =
-        sourceType === "commbank"
-          ? {
-              person_id: personId,
-              async: true,
-              lookback_days: days,
-            }
-          : { person_id: personId, async: true };
+          : sourceType === "wws"
+            ? "/api/v1/sources/wws/sync"
+            : "/api/v1/sources/coles/sync";
+      const body = {
+        person_id: personId,
+        async: true,
+        full_sync: fullSync,
+      };
 
       const started = await api<{
         job_id?: string;
         fetched?: number;
         imported?: number;
+        updated?: number;
         skipped?: number;
         error?: string;
       }>(path, { method: "POST", body: JSON.stringify(body) });
@@ -258,6 +277,50 @@ export function SourceCredentialPage() {
     }
   }
 
+  const dotClass =
+    connected === true
+      ? "bg-emerald-500"
+      : connected === false
+        ? "bg-red-500"
+        : "bg-ink-200";
+
+  const syncButtons = (
+    <div className="relative inline-flex">
+      <div className="inline-flex">
+        <button
+          type="button"
+          className="btn-primary rounded-r-none"
+          onClick={() => sync(false)}
+          disabled={syncing}
+        >
+          {syncing ? "同步中…" : "增量同步"}
+        </button>
+        <button
+          type="button"
+          className="btn-primary rounded-l-none border-l border-ink-500 px-2.5"
+          onClick={() => setShowFullSync((v) => !v)}
+          disabled={syncing}
+          aria-label="显示全量同步"
+        >
+          ▾
+        </button>
+      </div>
+      {showFullSync && (
+        <button
+          type="button"
+          className="btn-ghost absolute left-0 top-full mt-1 whitespace-nowrap"
+          onClick={() => {
+            setShowFullSync(false);
+            sync(true);
+          }}
+          disabled={syncing}
+        >
+          全量同步
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className="mx-auto max-w-lg space-y-8">
       <div>
@@ -267,11 +330,25 @@ export function SourceCredentialPage() {
         <div className="mt-4 flex items-center gap-4">
           <SourceLogo source={sourceType} className="h-12 w-12" />
           <div>
-            <h1 className="font-display text-3xl text-ink-800">{label}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="font-display text-3xl text-ink-800">{label}</h1>
+              <span
+                className={`h-2.5 w-2.5 rounded-full ${dotClass}`}
+                title={
+                  connected === true
+                    ? "连接正常"
+                    : connected === false
+                      ? "未连接"
+                      : ""
+                }
+              />
+            </div>
             <p className="text-sm text-ink-400">
-              {configured
-                ? `${isWws ? "凭证已保存" : "已连接"}${updatedAt ? ` · ${new Date(updatedAt).toLocaleString()}` : ""}`
-                : "未连接"}
+              {connected === true
+                ? `已连接${updatedAt ? ` · ${new Date(updatedAt).toLocaleString()}` : ""}`
+                : connected === false
+                  ? "未连接"
+                  : "检查中…"}
               {grantId ? ` · grant ${grantId.slice(0, 8)}…` : ""}
             </p>
           </div>
@@ -296,96 +373,88 @@ export function SourceCredentialPage() {
               OpenFeed 文档要求 HTTPS；若注册拒绝 HTTP，可改用 Inline JWKS（同一公钥）。
             </p>
           )}
-          <label className="block">
-            <span className="mb-1.5 block text-sm text-ink-600">回溯天数</span>
-            <input
-              className="field"
-              value={lookbackDays}
-              onChange={(e) => setLookbackDays(e.target.value)}
-              inputMode="numeric"
-            />
-            <p className="mt-1.5 text-xs text-ink-400">
-              CDR 通常最多约 730 天。大范围按约 90 天一段拉取。
-            </p>
-          </label>
           {error && <p className="text-sm text-red-700">{error}</p>}
           {message && <p className="text-sm text-ink-600">{message}</p>}
           {(syncing || syncProgress) && (
             <JobProgressBar progress={syncProgress} active={syncing} />
           )}
           <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={connectCommBank}
-              disabled={connecting || !appConfigured}
-            >
-              {connecting ? "跳转中…" : configured ? "重新授权" : "连接 CommBank"}
-            </button>
-            {configured && (
+            {connected === false && (
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={connectCommBank}
+                disabled={connecting || !appConfigured}
+              >
+                {connecting ? "跳转中…" : "连接 CommBank"}
+              </button>
+            )}
+            {connected === true && (
               <>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={sync}
-                  disabled={syncing}
-                >
-                  {syncing ? "同步中…" : "同步账单"}
-                </button>
+                {syncButtons}
                 <button type="button" className="btn-ghost" onClick={clearCred}>
                   断开
                 </button>
               </>
+            )}
+            {connected === undefined && (
+              <p className="text-sm text-ink-400">检查连接中…</p>
             )}
           </div>
         </div>
       ) : isWws ? (
         <div className="space-y-5">
           <p className="text-sm text-ink-600">
-            在 Chrome 安装 StarBegonia Woolworths 扩展。从扩展打开 Woolworths 并手动登录，然后生成绑定链接，粘贴到扩展完成绑定。密码只在 Woolworths 页面输入。
+            在 Chrome 安装 StarBegonia Everyday Rewards 扩展后，点击下方按钮会自动打开「我的活动」。登录（或已登录）后，扩展会读取 Everyday Rewards 会话并回传到 StarBegonia，无需复制绑定码。
           </p>
           <p className="text-xs text-ink-400">
-            扩展只读取 pastshops 请求范围内的会话 Cookie；后端加密保存。当前只完成凭证保存，尚未验证拉取订单。绑定链接只在本页内存中保留，刷新页面后需重新生成。
+            密码和验证码只在 Everyday Rewards 页面输入。凭证在后端加密保存；会话过期后重新点一下「连接」即可。
           </p>
-          {pairingLink && (
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-ink-600">一次性绑定链接</span>
-              <textarea
-                className="field min-h-[5rem] font-mono text-xs"
-                value={pairingLink}
-                readOnly
-                onFocus={(event) => event.currentTarget.select()}
-              />
-              <span className="mt-1 block text-xs text-ink-400">
-                到期时间：
-                {pairingExpiresAt
-                  ? new Date(pairingExpiresAt).toLocaleTimeString()
-                  : ""}
-              </span>
-            </label>
-          )}
           {error && <p className="text-sm text-red-700">{error}</p>}
           {message && <p className="text-sm text-ink-600">{message}</p>}
+          {(syncing || syncProgress) && (
+            <JobProgressBar progress={syncProgress} active={syncing} />
+          )}
           <div className="flex flex-wrap gap-3">
-            <button type="button" className="btn-primary" onClick={createWwsPairing}>
-              生成绑定链接
-            </button>
-            {pairingLink && (
-              <button type="button" className="btn-ghost" onClick={copyWwsPairing}>
-                复制链接
+            {connected === false && (
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={connectWws}
+                disabled={connecting}
+              >
+                {connecting ? "连接中…" : "连接 Everyday Rewards"}
               </button>
             )}
-            <button type="button" className="btn-ghost" onClick={refreshWwsStatus}>
-              刷新状态
-            </button>
-            {configured && (
-              <button type="button" className="btn-ghost" onClick={clearCred}>
-                断开
-              </button>
+            {connected === true && (
+              <>
+                {syncButtons}
+                <button type="button" className="btn-ghost" onClick={clearCred}>
+                  断开
+                </button>
+              </>
+            )}
+            {connected === undefined && (
+              <p className="text-sm text-ink-400">检查连接中…</p>
             )}
           </div>
         </div>
-      ) : (
+      ) : connected === true ? (
+        <div className="space-y-5">
+          <p className="text-sm text-ink-600">Coles 已连接。</p>
+          {error && <p className="text-sm text-red-700">{error}</p>}
+          {message && <p className="text-sm text-ink-600">{message}</p>}
+          {(syncing || syncProgress) && (
+            <JobProgressBar progress={syncProgress} active={syncing} />
+          )}
+          <div className="flex flex-wrap gap-3">
+            {syncButtons}
+            <button type="button" className="btn-ghost" onClick={clearCred}>
+              断开
+            </button>
+          </div>
+        </div>
+      ) : connected === false ? (
         <form onSubmit={saveColes} className="space-y-5">
           <label className="block">
             <span className="mb-1.5 block text-sm text-ink-600">Refresh token</span>
@@ -393,36 +462,19 @@ export function SourceCredentialPage() {
               className="field min-h-[5rem] font-mono text-sm"
               value={refreshToken}
               onChange={(e) => setRefreshToken(e.target.value)}
-              required={!configured}
-              placeholder={configured ? "留空则不改" : ""}
+              required
             />
           </label>
           {error && <p className="text-sm text-red-700">{error}</p>}
           {message && <p className="text-sm text-ink-600">{message}</p>}
-          {(syncing || syncProgress) && (
-            <JobProgressBar progress={syncProgress} active={syncing} />
-          )}
           <div className="flex flex-wrap gap-3">
             <button type="submit" className="btn-primary">
               保存
             </button>
-            {configured && (
-              <>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={sync}
-                  disabled={syncing}
-                >
-                  {syncing ? "同步中…" : "同步账单"}
-                </button>
-                <button type="button" className="btn-ghost" onClick={clearCred}>
-                  清除
-                </button>
-              </>
-            )}
           </div>
         </form>
+      ) : (
+        <p className="text-sm text-ink-400">检查连接中…</p>
       )}
     </div>
   );

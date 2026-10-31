@@ -4,11 +4,13 @@ from app.sources.base import SourceAdapter
 from app.sources.coles import ColesAdapter
 from app.sources.manual import ManualAdapter
 from app.sources.openfeed import OpenFeedAdapter
+from app.sources.wws import WwsAdapter
 
 _ADAPTERS: dict[str, SourceAdapter] = {
     ManualAdapter.source_type: ManualAdapter(),
     ColesAdapter.source_type: ColesAdapter(),
     OpenFeedAdapter.source_type: OpenFeedAdapter(),
+    WwsAdapter.source_type: WwsAdapter(),
 }
 
 def get_adapter(source_type: str) -> SourceAdapter:

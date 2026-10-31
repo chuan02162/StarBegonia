@@ -5,6 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { JobProgressBar } from "../components/JobProgressBar";
 import { SOURCE_LABELS, SourceLogo } from "../components/SourceLogo";
 import { pollJob, type JobProgress } from "../lib/jobs";
+import { useRefreshSourceStatus, useSourceStatus } from "../lib/sourceStatus";
 import type { Household, Invite, Person } from "../types";
 
 type SourceInfo = {
@@ -39,6 +40,12 @@ export function AccountPage() {
   const [syncProgress, setSyncProgress] = useState<JobProgress | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [jevProgress, setJevProgress] = useState<JobProgress | null>(null);
+
+  const sourceStatus = useSourceStatus();
+  const {
+    busy: refreshingStatus,
+    run: refreshStatus,
+  } = useRefreshSourceStatus();
 
   const loadHousehold = useCallback(async () => {
     const data = await api<{
@@ -665,8 +672,36 @@ export function AccountPage() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-display text-xl text-ink-800">数据源</h2>
-        <p className="text-sm text-ink-500">连接超市 / 银行等平台，用于同步账单</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-display text-xl text-ink-800">数据源</h2>
+            <p className="text-sm text-ink-500">连接超市 / 银行等平台，用于同步账单</p>
+          </div>
+          <button
+            type="button"
+            className="btn-ghost px-2 py-2"
+            onClick={() =>
+              refreshStatus().catch(() => setError("刷新连接状态失败"))
+            }
+            disabled={refreshingStatus}
+            aria-label="刷新连接状态"
+            title="刷新连接状态"
+          >
+            <svg
+              className={`h-5 w-5 ${refreshingStatus ? "animate-spin" : ""}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+              <path d="M21 3v6h-6" />
+            </svg>
+          </button>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -686,25 +721,40 @@ export function AccountPage() {
         )}
         <ul className="divide-y divide-ink-100">
           {platforms.map((p) => (
-            <li key={p.type}>
-              <Link
-                to={`/account/sources/${p.type}`}
-                className="flex items-center gap-4 py-4 transition-colors hover:bg-ink-50/60"
-              >
-                <SourceLogo source={p.type} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-ink-800">{p.label}</p>
-                  <p className="text-sm text-ink-400">
-                    {p.configured
-                      ? p.supportsSync
-                        ? "已连接"
-                        : "已绑定（同步待接入）"
-                      : "未配置"}
-                  </p>
-                </div>
-                <span className="text-sm text-ink-500">配置 →</span>
-              </Link>
-            </li>
+            (() => {
+              const st = sourceStatus[p.type];
+              const dotClass =
+                st === true
+                  ? "bg-emerald-500"
+                  : st === false
+                    ? "bg-red-500"
+                    : "bg-ink-200";
+              return (
+                <li key={p.type}>
+                  <Link
+                    to={`/account/sources/${p.type}`}
+                    className="flex items-center gap-4 py-4 transition-colors hover:bg-ink-50/60"
+                  >
+                    <SourceLogo source={p.type} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-ink-800">{p.label}</p>
+                      <p className="text-sm text-ink-400">
+                        {p.configured
+                          ? p.supportsSync
+                            ? "已连接"
+                            : "已绑定（同步待接入）"
+                          : "未配置"}
+                      </p>
+                    </div>
+                    <span
+                      className={`h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}`}
+                      title={st === true ? "连接正常" : st === false ? "未连接" : ""}
+                    />
+                    <span className="text-sm text-ink-500">配置 →</span>
+                  </Link>
+                </li>
+              );
+            })()
           ))}
         </ul>
       </section>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { SourceLogo } from "../components/SourceLogo";
+import { SOURCE_LABELS, SourceLogo } from "../components/SourceLogo";
 import {
   billLooksLikeIncome,
   formatMoneySigned,
@@ -114,7 +114,7 @@ export function BillsPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {["", "manual", "coles", "commbank"].map((s) => (
+        {["", "manual", "coles", "commbank", "wws"].map((s) => (
           <button
             key={s || "all"}
             type="button"
@@ -125,7 +125,7 @@ export function BillsPage() {
                 : "bg-white text-ink-600 ring-1 ring-ink-100"
             }`}
           >
-            {s || "全部"}
+            {s ? SOURCE_LABELS[s] || s : "全部"}
           </button>
         ))}
         <select

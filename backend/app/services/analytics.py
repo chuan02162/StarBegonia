@@ -127,30 +127,47 @@ def overview(
                 return i
         return None
 
+    receipt_signed_sources = {"coles", "wws"}
+    seen_bills: set[int] = set()
     for entry, bill in rows:
-        amount = Decimal(entry.amount or 0)
-        if amount == 0:
-            continue
-        cat = entry.category_id or "other"
         bi = bucket_index(bill.occurred_at)
         if bi is None:
             continue
+        net = Decimal(
+            bill.net_amount if bill.net_amount is not None else (bill.total_amount or 0)
+        )
         in_current = current_start <= bill.occurred_at < current_end
 
-        # Polarity from amount sign; Jev category is orthogonal.
-        if amount > 0:
-            income_by_bucket[bi] += amount
-            if in_current:
-                current_income += amount
-        else:
-            exp = abs(amount)
-            expense_by_bucket[bi] += exp
-            if in_current:
-                current_expense += exp
-                # Skip transfer in category pie (internal / 不计收支 label)
-                if cat not in EXCLUDE_IDS:
-                    by_category[cat] += exp
+        # Bill-level income/expense from the signed net amount (once per bill).
+        if bill.id not in seen_bills:
+            seen_bills.add(bill.id)
+            if net < 0:
+                exp = abs(net)
+                expense_by_bucket[bi] += exp
+                if in_current:
+                    current_expense += exp
                     by_source[bill.source_type or "unknown"] += exp
+            elif net > 0:
+                income_by_bucket[bi] += net
+                if in_current:
+                    current_income += net
+
+        # Category pie attributes spend line items (positive for receipt-signed
+        # grocery sources, negative for bank-style signed sources).
+        if net < 0:
+            line_amount = Decimal(entry.amount or 0)
+            if line_amount == 0:
+                continue
+            is_spend = (
+                line_amount > 0
+                if bill.source_type in receipt_signed_sources
+                else line_amount < 0
+            )
+            if not is_spend:
+                continue
+            cat = entry.category_id or "other"
+            if cat not in EXCLUDE_IDS:
+                by_category[cat] += abs(line_amount)
 
     series = []
     for i, s in enumerate(starts):

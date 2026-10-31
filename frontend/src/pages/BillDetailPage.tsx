@@ -7,6 +7,7 @@ import { SourceLogo } from "../components/SourceLogo";
 import {
   billLooksLikeIncome,
   formatEntryQty,
+  formatMoney,
   formatMoneySigned,
   formatOccurredAt,
   isIncomeAmount,
@@ -58,6 +59,8 @@ export function BillDetailPage() {
   const catMap = Object.fromEntries(
     (vocab?.categories || []).map((c) => [c.id, c.label]),
   );
+  const receiptSigned =
+    bill.source_type === "coles" || bill.source_type === "wws";
 
   return (
     <div className="space-y-8">
@@ -78,15 +81,21 @@ export function BillDetailPage() {
           {bill.note && <p className="mt-2 text-sm text-ink-400">{bill.note}</p>}
         </div>
         <div className="text-right">
-          <p
-            className={`font-display text-3xl tabular-nums ${moneyClass(
-              billLooksLikeIncome(bill.entries, bill.total_amount),
-            )}`}
-          >
-            {formatMoneySigned(bill.total_amount, bill.currency, {
-              income: billLooksLikeIncome(bill.entries, bill.total_amount),
-            })}
-          </p>
+          {receiptSigned ? (
+            <p className="font-display text-3xl tabular-nums text-ink-800">
+              {formatMoney(Math.abs(Number(bill.total_amount)), bill.currency)}
+            </p>
+          ) : (
+            <p
+              className={`font-display text-3xl tabular-nums ${moneyClass(
+                billLooksLikeIncome(bill.entries, bill.total_amount),
+              )}`}
+            >
+              {formatMoneySigned(bill.total_amount, bill.currency, {
+                income: billLooksLikeIncome(bill.entries, bill.total_amount),
+              })}
+            </p>
+          )}
           {bill.source_type === "manual" && (
             <button
               type="button"
@@ -110,6 +119,7 @@ export function BillDetailPage() {
               categories={vocab?.categories || []}
               catMap={catMap}
               onUpdated={reload}
+              receiptSigned={receiptSigned}
             />
           ))}
         </ul>
@@ -127,12 +137,14 @@ function EntryRow({
   categories,
   catMap,
   onUpdated,
+  receiptSigned,
 }: {
   entry: Entry;
   currency: string;
   categories: CategoryItem[];
   catMap: Record<string, string>;
   onUpdated: () => Promise<void>;
+  receiptSigned: boolean;
 }) {
   const onSpecial = Number(entry.discount) > 0;
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -165,9 +177,19 @@ function EntryRow({
   const pending = entry.classification_status === "pending";
 
   const income = isIncomeAmount(entry.amount);
+  const lineAmount = Number(entry.amount);
+  const isDiscount = receiptSigned && lineAmount < 0;
   const thumbSrc = isFlybuysEntry(entry.name)
     ? "/flybuys.png"
     : entry.image_url;
+  const amountClass = receiptSigned
+    ? isDiscount
+      ? "text-rose-600"
+      : "text-ink-800"
+    : moneyClass(income);
+  const amountText = receiptSigned
+    ? formatMoney(entry.amount, currency)
+    : formatMoneySigned(entry.amount, currency, { income });
 
   return (
     <li className="py-5">
@@ -189,8 +211,8 @@ function EntryRow({
           {err && <p className="mt-1 text-sm text-red-700">{err}</p>}
         </div>
         <div className="shrink-0 text-right">
-          <p className={`font-medium tabular-nums ${moneyClass(income)}`}>
-            {formatMoneySigned(entry.amount, currency, { income })}
+          <p className={`font-medium tabular-nums ${amountClass}`}>
+            {amountText}
           </p>
           {onSpecial && (
             <span className="mt-1 inline-block rounded bg-[#FFE600] px-2 py-0.5 text-xs font-semibold text-ink-900">

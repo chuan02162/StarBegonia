@@ -44,6 +44,16 @@ class ColesAdapter:
     def validate_credential(self, cred: dict[str, Any]) -> bool:
         return bool((cred.get("refresh_token") or "").strip())
 
+    def check(self, cred: dict[str, Any]) -> dict[str, Any]:
+        client = _ColesClient(cred)
+        client.authenticate()
+        updated = {**cred}
+        if client.access_token:
+            updated["access_token"] = client.access_token
+        if client.refresh_token:
+            updated["refresh_token"] = client.refresh_token
+        return updated
+
     def fetch_raw(self, cred: dict[str, Any], cursor: str | None = None) -> RawPayload:
         client = _ColesClient(cred)
         client.authenticate()
@@ -385,21 +395,27 @@ def _parse_order(order: dict[str, Any]) -> BillDraft | None:
         entries.append(
             EntryDraft(
                 name="Order total",
-                amount=-abs(paid),
+                amount=abs(paid),
                 quantity=Decimal("1"),
-                unit_price=-abs(paid),
+                unit_price=abs(paid),
             )
         )
+        net_amount = -abs(paid)
     elif order_total is not None:
         # Line items are pre-tender; orderTotalPrice is what was actually paid
         # (Flybuys dollars, vouchers, etc. may reduce the total).
         _append_tender_adjustment(entries, paid=_dec(order_total), attrs=attrs)
+        net_amount = -abs(_dec(order_total))
+    else:
+        line_total = sum((e.amount for e in entries), Decimal("0"))
+        net_amount = -abs(line_total)
 
     return BillDraft(
         occurred_at=occurred,
         merchant=merchant,
         currency="AUD",
         external_id=external_id,
+        net_amount=net_amount,
         note="; ".join(note_parts) if note_parts else None,
         entries=entries,
     )
@@ -411,7 +427,7 @@ def _append_tender_adjustment(
     paid: Decimal,
     attrs: dict[str, Any],
 ) -> None:
-    # entries are signed (negative spend). Compare magnitude to paid.
+    # entries are receipt-signed (positive). Compare magnitude to paid.
     line_sum_abs = sum((abs(e.amount) for e in entries), Decimal("0"))
     paid_abs = abs(paid)
     diff = (line_sum_abs - paid_abs).quantize(Decimal("0.01"))
@@ -425,12 +441,10 @@ def _append_tender_adjustment(
     )
     if diff > 0:
         name = "Flybuys 优惠" if has_flybuys else "结账优惠"
-        # Credit toward the bill (reduces net outflow)
-        amount = diff
     else:
         name = "结账调整"
-        # Extra charged beyond lines → more outflow
-        amount = diff  # negative
+    # Receipt sign: discount is negative, extra charge is positive.
+    amount = -diff
     entries.append(
         EntryDraft(
             name=name,
@@ -458,9 +472,9 @@ def _parse_item(item: dict[str, Any]) -> EntryDraft | None:
         notes.append(f"brand={item.get('brand')}")
     if item.get("id") is not None:
         notes.append(f"productId={item.get('id')}")
-    # Signed amounts: grocery spend is money out (negative).
-    signed = -abs(amount) if amount != 0 else Decimal("0")
-    signed_unit = -abs(unit) if unit is not None else None
+    # Receipt sign: line items are positive, exactly as printed on the receipt.
+    signed = abs(amount) if amount != 0 else Decimal("0")
+    signed_unit = abs(unit) if unit is not None else None
     return EntryDraft(
         name=name[:255],
         amount=signed,

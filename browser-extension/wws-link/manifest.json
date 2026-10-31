@@ -1,19 +1,31 @@
 {
   "manifest_version": 3,
-  "name": "StarBegonia Woolworths Link",
-  "version": "0.1.0",
-  "description": "Bind the current Woolworths browser session to StarBegonia.",
-  "permissions": ["cookies"],
-  "optional_host_permissions": [
-    "https://www.woolworths.com.au/*",
-    "https://1cchome1.duckdns.org/*",
-    "https://localhost/*",
-    "http://localhost/*",
-    "https://127.0.0.1/*",
-    "http://127.0.0.1/*"
+  "name": "StarBegonia Everyday Rewards Link",
+  "version": "0.2.0",
+  "description": "Reads the Everyday Rewards session token so StarBegonia can sync eReceipts.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAspiKucETMVoiTmEVNlUPAkkGrf3ZIpVHJKL83T/eQhK4gfZap4l9DTTQusLw3ZgMgwdrVmiBFuLqd9sfpZiDikxjg3sBYm9LthJdo705CVZMkujUnIK6zFGT1QmxAT0TGBn9Tj7zseW3tazCVVV7idQjWBYQ5uEEPa1+sPQCB6SUvLncBuNhkvLJlqv7ez8Etb8wiqsy/xqFVadKNmSxPfla50EXT/TIyg15jazsC3iFKPDPA/PIfS+VmvDc3kS+uPqm7obyVePL8qYCQR3PjNIWb39kL1cY9T47jHdlGuq+YRUxI+2lqBT0pF0aSoJuSpARwbwAmuShPU2QCXmuKwIDAQAB",
+  "permissions": [],
+  "host_permissions": ["https://www.everyday.com.au/*"],
+  "externally_connectable": {
+    "matches": [
+      "https://1cchome1.duckdns.org/*",
+      "https://localhost/*",
+      "http://localhost/*",
+      "https://127.0.0.1/*",
+      "http://127.0.0.1/*"
+    ]
+  },
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.everyday.com.au/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
   ],
   "action": {
-    "default_title": "StarBegonia Woolworths",
-    "default_popup": "popup.html"
+    "default_title": "StarBegonia Everyday Rewards"
   }
 }

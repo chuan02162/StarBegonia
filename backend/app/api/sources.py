@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import hashlib
-import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Any
 from urllib.parse import urlencode
 
 from flask import Blueprint, current_app, jsonify, redirect, request
@@ -15,9 +14,10 @@ from app.extensions import db
 from app.jobs.coles_sync import run_coles_sync
 from app.jobs.commbank_sync import run_commbank_sync
 from app.jobs.person_full_sync import run_person_full_sync
+from app.jobs.wws_sync import run_wws_sync
 from app.jobs.progress import job_progress_payload
 from app.jobs.queues import sync_queue
-from app.models import SourceCredential, WwsPairing
+from app.models import SourceCredential
 from app.security.crypto import decrypt_payload, encrypt_payload
 from app.services import openfeed_auth
 from app.services.openfeed_auth import OpenFeedAuthError
@@ -26,9 +26,12 @@ from app.services.sync import (
     sync_coles_source,
     sync_commbank_source,
     sync_person_sources,
+    sync_wws_source,
 )
 from app.sources import list_sources
+from app.sources.coles import ColesAdapter, ColesError
 from app.sources.openfeed import MAX_LOOKBACK_DAYS
+from app.sources.wws import WwsAdapter, WwsError
 
 bp = Blueprint("sources", __name__)
 
@@ -48,136 +51,27 @@ def wws_status():
     )
 
 
-@bp.post("/wws/pairing")
+@bp.get("/wws/check")
 @login_required
-def wws_create_pairing():
+def wws_check():
     person = current_person()
-    user = person.user
-    now = datetime.utcnow()
-    code = secrets.token_urlsafe(32)
-    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
-
-    # Invalidate earlier unused codes for this account. Only the hash is stored.
-    WwsPairing.query.filter_by(person_id=person.id, used_at=None).delete(
-        synchronize_session=False
-    )
-    pairing = WwsPairing(
-        code_hash=code_hash,
-        user_id=user.id,
-        person_id=person.id,
-        created_at=now,
-        expires_at=now + timedelta(minutes=10),
-    )
-    db.session.add(pairing)
-    db.session.commit()
-
-    app_origin = (
-        current_app.config.get("APP_PUBLIC_URL") or request.host_url
-    ).rstrip("/")
-    return jsonify(
-        {
-            "pairing_link": f"{app_origin}/#wws_pair={code}",
-            "expires_at": pairing.expires_at.isoformat() + "Z",
-        }
-    )
-
-
-@bp.post("/wws/claim")
-def wws_claim_credential():
-    raw_body = request.get_data(cache=True)
-    if len(raw_body) > 96 * 1024:
-        return jsonify({"error": "Woolworths credential payload is too large"}), 413
-    body = request.get_json(silent=True)
-    if not isinstance(body, dict):
-        return jsonify({"error": "invalid credential payload"}), 400
-    code = body.get("code")
-    if not isinstance(code, str) or len(code) > 128:
-        return jsonify({"error": "invalid or expired pairing link"}), 400
-
-    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
-    pairing = WwsPairing.query.filter_by(code_hash=code_hash).with_for_update().first()
-    now = datetime.utcnow()
-    if (
-        not pairing
-        or pairing.used_at is not None
-        or pairing.expires_at <= now
-    ):
-        return jsonify({"error": "invalid or expired pairing link"}), 400
-
-    incoming = body.get("cookies")
-    if not isinstance(incoming, list) or not incoming or len(incoming) > 80:
-        return jsonify({"error": "no Woolworths session cookies found"}), 400
-
-    cookies = []
-    for cookie in incoming:
-        if not isinstance(cookie, dict):
-            return jsonify({"error": "invalid cookie entry"}), 400
-        name = cookie.get("name")
-        value = cookie.get("value")
-        domain = str(cookie.get("domain") or "").lower().lstrip(".")
-        path = cookie.get("path") or "/"
-        if (
-            not isinstance(name, str)
-            or not name
-            or len(name) > 256
-            or not isinstance(value, str)
-            or len(value) > 8192
-            or any(ch in name for ch in ("=", ";", "\r", "\n", "\0"))
-            or any(ch in value for ch in (";", "\r", "\n", "\0"))
-            or not (
-                domain == "woolworths.com.au"
-                or domain.endswith(".woolworths.com.au")
-            )
-            or not isinstance(path, str)
-            or not path.startswith("/")
-            or len(path) > 1024
-        ):
-            return jsonify({"error": "invalid Woolworths cookie"}), 400
-        expires = cookie.get("expires")
-        if expires is not None and (
-            isinstance(expires, bool)
-            or not isinstance(expires, (int, float))
-        ):
-            return jsonify({"error": "invalid Woolworths cookie"}), 400
-        cookies.append(
-            {
-                "name": name,
-                "value": value,
-                "domain": domain,
-                "path": path,
-                "expires": expires,
-                "http_only": bool(cookie.get("http_only")),
-                "secure": bool(cookie.get("secure")),
-                "same_site": cookie.get("same_site"),
-            }
-        )
-
-    user_agent = body.get("user_agent")
-    if not isinstance(user_agent, str) or not user_agent or len(user_agent) > 512:
-        return jsonify({"error": "invalid browser user agent"}), 400
-
-    credential = {
-        "cookies": cookies,
-        "user_agent": user_agent,
-        "captured_at": body.get("captured_at"),
-    }
-    row = SourceCredential.query.filter_by(
-        person_id=pairing.person_id, source_type="wws"
+    cred = SourceCredential.query.filter_by(
+        person_id=person.id, source_type="wws"
     ).first()
-    if row is None:
-        row = SourceCredential(
-            person_id=pairing.person_id,
-            source_type="wws",
-            payload_encrypted="",
-        )
-        db.session.add(row)
-    row.payload_encrypted = encrypt_payload(credential)
-    row.label = "Woolworths"
-    pairing.used_at = now
-    db.session.commit()
-    return jsonify(
-        {"credential_saved": True, "updated_at": row.updated_at.isoformat() + "Z"}
-    )
+    if not cred:
+        return jsonify({"ok": False, "message": "尚未连接"})
+    try:
+        payload = decrypt_payload(cred.payload_encrypted)
+    except ValueError:
+        return jsonify({"ok": False, "message": "凭证无法解密"})
+    adapter = WwsAdapter()
+    if not adapter.validate_credential(payload):
+        return jsonify({"ok": False, "message": "凭证无效，请重新连接"})
+    try:
+        adapter.check(payload)
+    except WwsError as exc:
+        return jsonify({"ok": False, "message": exc.message})
+    return jsonify({"ok": True, "message": "连接正常"})
 
 
 @bp.delete("/wws/credential")
@@ -193,6 +87,41 @@ def wws_delete_credential():
     return "", 204
 
 
+@bp.post("/wws/sync")
+@login_required
+def sync_wws():
+    body = request.get_json(silent=True) or {}
+    person_id = current_person().id
+    overwrite = bool(body.get("overwrite", False))
+    full_sync = bool(body.get("full_sync", False))
+    async_mode = body.get("async", True)
+
+    if async_mode:
+        try:
+            job = sync_queue(_redis()).enqueue(
+                run_wws_sync,
+                person_id,
+                overwrite,
+                full_sync,
+                job_timeout=3600,
+                result_ttl=3600,
+                failure_ttl=3600,
+            )
+            return jsonify(
+                {"job_id": job.id, "status": "queued", "person_id": person_id}
+            ), 202
+        except Exception:
+            pass
+
+    try:
+        result = sync_wws_source(
+            person_id, overwrite=overwrite, full_sync=full_sync
+        )
+    except SyncError as exc:
+        return jsonify({"error": exc.message}), exc.status_code
+    return jsonify(result)
+
+
 def _redis() -> Redis:
     return Redis.from_url(current_app.config["REDIS_URL"])
 
@@ -201,6 +130,48 @@ def _redis() -> Redis:
 @login_required
 def get_sources():
     return jsonify({"sources": list_sources()})
+
+
+@bp.get("/status")
+@login_required
+def sources_status():
+    """Live connection status for each syncable source (for status dots)."""
+    person = current_person()
+    out: list[dict[str, Any]] = []
+    for source_type in ("coles", "commbank", "wws"):
+        connected = False
+        cred = SourceCredential.query.filter_by(
+            person_id=person.id, source_type=source_type
+        ).first()
+        payload = None
+        if cred:
+            try:
+                payload = decrypt_payload(cred.payload_encrypted)
+            except ValueError:
+                payload = None
+
+        if source_type == "commbank":
+            connected = bool(payload and payload.get("refresh_token"))
+        elif source_type == "wws" and payload and WwsAdapter().validate_credential(payload):
+            try:
+                WwsAdapter().check(payload)
+                connected = True
+            except WwsError:
+                connected = False
+        elif source_type == "coles" and payload and ColesAdapter().validate_credential(payload):
+            try:
+                updated = ColesAdapter().check(payload)
+                connected = True
+                if (
+                    updated.get("refresh_token") != payload.get("refresh_token")
+                    or updated.get("access_token") != payload.get("access_token")
+                ):
+                    cred.payload_encrypted = encrypt_payload(updated)
+                    db.session.commit()
+            except ColesError:
+                connected = False
+        out.append({"source_type": source_type, "connected": connected})
+    return jsonify({"sources": out})
 
 
 @bp.get("/.well-known/jwks.json")
@@ -238,6 +209,35 @@ def commbank_status():
             "public_url": current_app.config.get("APP_PUBLIC_URL") or "",
         }
     )
+
+
+@bp.get("/coles/check")
+@login_required
+def coles_check():
+    person = current_person()
+    cred = SourceCredential.query.filter_by(
+        person_id=person.id, source_type="coles"
+    ).first()
+    if not cred:
+        return jsonify({"ok": False, "message": "尚未连接"})
+    try:
+        payload = decrypt_payload(cred.payload_encrypted)
+    except ValueError:
+        return jsonify({"ok": False, "message": "凭证无法解密"})
+    adapter = ColesAdapter()
+    if not adapter.validate_credential(payload):
+        return jsonify({"ok": False, "message": "凭证无效，请重新连接"})
+    try:
+        updated = adapter.check(payload)
+    except ColesError as exc:
+        return jsonify({"ok": False, "message": exc.message})
+    if (
+        updated.get("refresh_token") != payload.get("refresh_token")
+        or updated.get("access_token") != payload.get("access_token")
+    ):
+        cred.payload_encrypted = encrypt_payload(updated)
+        db.session.commit()
+    return jsonify({"ok": True, "message": "连接正常"})
 
 
 @bp.get("/openfeed/connect")

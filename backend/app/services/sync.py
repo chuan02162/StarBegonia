@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from app.extensions import db
@@ -16,6 +17,7 @@ from app.services.titles import is_generic_title
 from app.sources.base import BillDraft
 from app.sources.coles import ColesAdapter, ColesError
 from app.sources.openfeed import OpenFeedAdapter, OpenFeedError
+from app.sources.wws import WwsAdapter, WwsError
 
 # Re-fetch a short overlap so pending→posted / Flybuys adjustments still land.
 _COLES_OVERLAP_DAYS = 2
@@ -161,6 +163,100 @@ def sync_coles_source(
     return result
 
 
+def sync_wws_source(
+    person_id: int,
+    *,
+    overwrite: bool = False,
+    defer_scans: bool = False,
+    full_sync: bool = False,
+) -> dict[str, Any]:
+    """Import in-store Woolworths purchases from Everyday Rewards eReceipts."""
+    from app.jobs.progress import set_progress
+
+    person = db.session.get(Person, person_id)
+    if not person:
+        raise SyncError("person not found", 404)
+
+    try:
+        household = household_service.require_active_household(person_id)
+    except household_service.HouseholdError as exc:
+        raise SyncError(exc.message, exc.status_code) from exc
+
+    cred_row = SourceCredential.query.filter_by(
+        person_id=person_id, source_type="wws"
+    ).first()
+    if not cred_row:
+        raise SyncError("Woolworths is not connected for this person", 400)
+
+    try:
+        payload = decrypt_payload(cred_row.payload_encrypted)
+    except ValueError as exc:
+        raise SyncError("could not decrypt Woolworths credential", 400) from exc
+
+    adapter = WwsAdapter()
+    if not adapter.validate_credential(payload):
+        raise SyncError("invalid Woolworths credential; reconnect Woolworths", 400)
+
+    def _fetch_progress(*, current: int, total: int, message: str = "") -> None:
+        set_progress(
+            stage="wws",
+            current=current,
+            total=max(total, 1),
+            message=message or "拉取 Woolworths 收据…",
+        )
+
+    since: datetime | None = None
+    incremental = False
+    if not full_sync:
+        watermark = _latest_occurred_at(person_id, "wws")
+        if watermark:
+            since = watermark - timedelta(days=1)
+            incremental = True
+
+    runtime = {**payload, "_on_progress": _fetch_progress}
+    set_progress(stage="wws", current=0, total=1, message="读取 Everyday Rewards 收据…")
+    try:
+        raw = adapter.fetch_raw(runtime)
+        drafts = adapter.parse(raw)
+    except WwsError as exc:
+        raise SyncError(exc.message, exc.status_code or 502) from exc
+
+    cred_row.last_validated_at = datetime.utcnow()
+    cred_row.payload_encrypted = encrypt_payload(payload)
+    if since is not None:
+        drafts = [draft for draft in drafts if draft.occurred_at > since]
+    result = _persist_drafts(
+        person_id=person_id,
+        household_id=household.id,
+        source_type="wws",
+        adapter=adapter,
+        drafts=drafts,
+        backfill_images=True,
+        overwrite=overwrite,
+        scan_related=not defer_scans,
+    )
+    result["listed"] = (raw.data or {}).get("listed")
+    result["detailed"] = (raw.data or {}).get("detailed")
+    result["images_matched"] = (raw.data or {}).get("images_matched", 0)
+    result["image_candidates_count"] = (raw.data or {}).get(
+        "image_candidates_count", 0
+    )
+    result["image_time_matched_receipts"] = (raw.data or {}).get(
+        "image_time_matched_receipts", 0
+    )
+    result["image_name_matches"] = (raw.data or {}).get("image_name_matches", 0)
+    result["image_enrichment_available"] = (raw.data or {}).get(
+        "image_enrichment_available", False
+    )
+    result["image_enrichment_error"] = (raw.data or {}).get(
+        "image_enrichment_error"
+    )
+    result["overwrite"] = overwrite
+    result["incremental"] = incremental
+    result["since"] = since.isoformat() if since else None
+    return result
+
+
 def sync_commbank_source(
     person_id: int,
     *,
@@ -200,7 +296,7 @@ def sync_commbank_source(
         payload = {**payload, "from": from_date}
     if to_date:
         payload = {**payload, "to": to_date}
-    if overwrite and lookback_days is None and not from_date:
+    if (full_sync or overwrite) and lookback_days is None and not from_date:
         # An account wide overwrite must not inherit a date range saved by an
         # earlier, narrower sync. OpenFeed exposes at most two years of history.
         payload.pop("from", None)
@@ -433,6 +529,9 @@ def _refresh_existing_bill(
         if draft.note != bill.note:
             bill.note = draft.note
             changed = True
+        if draft.net_amount is not None and Decimal(str(draft.net_amount)) != bill.net_amount:
+            bill.net_amount = draft.net_amount
+            changed = True
         need_classify = _replace_bill_entries(bill, draft)
         changed = True
         return changed, need_classify
@@ -542,7 +641,7 @@ def sync_person_sources(
 
     creds = SourceCredential.query.filter_by(person_id=person_id).all()
     types = {c.source_type for c in creds}
-    ordered = [t for t in ("commbank", "coles") if t in types]
+    ordered = [t for t in ("commbank", "coles", "wws") if t in types]
     if not ordered:
         raise SyncError("没有已连接的可同步数据源", 400)
 
@@ -575,6 +674,13 @@ def sync_person_sources(
                     person_id,
                     full_sync=full_sync,
                     overwrite=overwrite,
+                    defer_scans=True,
+                )
+            elif source_type == "wws":
+                results["wws"] = sync_wws_source(
+                    person_id,
+                    overwrite=overwrite,
+                    full_sync=full_sync,
                     defer_scans=True,
                 )
         except SyncError as exc:
@@ -684,6 +790,7 @@ def _insert_bill(
         currency=draft.currency or "AUD",
         external_id=draft.external_id,
         note=draft.note,
+        net_amount=draft.net_amount,
         dedup_status="unmatched",
     )
     db.session.add(bill)

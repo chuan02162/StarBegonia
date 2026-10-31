@@ -50,13 +50,14 @@ def test_parse_order_detail():
     assert bill.external_id == "12810260768117762100"
     assert bill.merchant == "Coles Epping"
     assert len(bill.entries) == 2
-    assert bill.entries[0].amount == Decimal("-4.95")
+    assert bill.entries[0].amount == Decimal("4.95")
     assert bill.entries[0].image_url == (
         "https://cdn.productimages.coles.com.au/productimages/1/2/123.jpg"
     )
     assert bill.entries[1].quantity == Decimal("2")
     assert bill.entries[1].discount == Decimal("0.5")
     assert bill.entries[1].image_url is None
+    assert bill.net_amount == Decimal("-7.95")
     assert adapter.external_id(bill) == bill.external_id
 
 
@@ -93,9 +94,9 @@ def test_flybuys_adjustment_when_total_differs():
     assert len(bill.entries) == 3
     adj = bill.entries[-1]
     assert adj.name == "Flybuys 优惠"
-    assert adj.amount == Decimal("11.00")  # credit / discount
-    assert bill.entries[0].amount == Decimal("-20.00")
-    assert sum(e.amount for e in bill.entries) == Decimal("-21.81")
+    assert adj.amount == Decimal("-11.00")  # discount line, receipt sign
+    assert bill.entries[0].amount == Decimal("20.00")
+    assert bill.net_amount == Decimal("-21.81")
 
 
 def test_validate_credential():

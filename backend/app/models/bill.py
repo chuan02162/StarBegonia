@@ -25,6 +25,10 @@ class Bill(db.Model):
     currency = db.Column(db.String(8), nullable=False, default="AUD")
     external_id = db.Column(db.String(255), nullable=True)
     note = db.Column(db.Text, nullable=True)
+    # Signed net amount (negative = money out, positive = money in). Stored
+    # explicitly so line items can keep their receipt sign (positive items,
+    # negative discounts) without losing the bill's direction.
+    net_amount = db.Column(db.Numeric(14, 2), nullable=True)
     # unmatched | suggested | linked | ignored
     dedup_status = db.Column(
         db.String(32), nullable=False, default="unmatched", index=True
@@ -49,6 +53,8 @@ class Bill(db.Model):
 
     @property
     def total_amount(self) -> Decimal:
+        if self.net_amount is not None:
+            return Decimal(self.net_amount)
         return sum((e.amount for e in self.entries), Decimal("0"))
 
     def to_dict(self, *, include_entries: bool = True) -> dict:

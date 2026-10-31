@@ -26,6 +26,7 @@ class BillDraft:
     merchant: str | None = None
     currency: str = "AUD"
     external_id: str | None = None
+    net_amount: Decimal | None = None
     note: str | None = None
     entries: list[EntryDraft] = field(default_factory=list)
 

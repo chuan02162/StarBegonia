@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-SYNCABLE = ("coles", "commbank")
+SYNCABLE = ("coles", "commbank", "wws")
 
 
 def seconds_until_local_time(
@@ -34,9 +34,14 @@ def seconds_until_local_time(
 
 
 def run_daily_sync_all(*, gap_seconds: float = 45.0) -> dict[str, Any]:
-    """Sync every Coles/CommBank credential one-by-one (never concurrent)."""
+    """Sync each source credential one-by-one (never concurrent)."""
     from app.models import SourceCredential
-    from app.services.sync import SyncError, sync_coles_source, sync_commbank_source
+    from app.services.sync import (
+        SyncError,
+        sync_coles_source,
+        sync_commbank_source,
+        sync_wws_source,
+    )
 
     rows = (
         SourceCredential.query.filter(SourceCredential.source_type.in_(SYNCABLE))
@@ -60,6 +65,8 @@ def run_daily_sync_all(*, gap_seconds: float = 45.0) -> dict[str, Any]:
                 outcome = sync_coles_source(cred.person_id)
             elif cred.source_type == "commbank":
                 outcome = sync_commbank_source(cred.person_id)
+            elif cred.source_type == "wws":
+                outcome = sync_wws_source(cred.person_id)
             else:
                 continue
             item["ok"] = True
@@ -68,6 +75,10 @@ def run_daily_sync_all(*, gap_seconds: float = 45.0) -> dict[str, Any]:
             item["updated"] = outcome.get("updated")
             item["skipped"] = outcome.get("skipped")
             item["incremental"] = outcome.get("incremental")
+            item["images_matched"] = outcome.get("images_matched")
+            item["image_enrichment_available"] = outcome.get(
+                "image_enrichment_available"
+            )
             logger.info(
                 "daily_sync ok person=%s source=%s fetched=%s",
                 cred.person_id,

@@ -93,13 +93,16 @@ def compute_settlement_result(
     for bill in bills:
         payer_id = bill.person_id
         payer_name = names.get(payer_id, f"#{payer_id}")
+        receipt_signed = bill.source_type in {"coles", "wws"}
         for entry in bill.entries:
             cat = entry.category_id or "other"
             if cat in EXCLUDE_IDS:
                 continue
             raw_amount = Decimal(str(entry.amount or 0))
-            # AA only on money-out (negative). Credits/income skipped by sign.
-            if raw_amount >= 0:
+            # AA only on money-out lines. Receipt-signed grocery sources store
+            # spend as positive; bank-style sources store spend as negative.
+            is_spend = (raw_amount > 0) if receipt_signed else (raw_amount < 0)
+            if not is_spend:
                 continue
             amount = abs(raw_amount)
 
