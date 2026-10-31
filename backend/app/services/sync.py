@@ -5,7 +5,14 @@ from decimal import Decimal
 from typing import Any
 
 from app.extensions import db
-from app.models import Bill, Entry, Person, SourceCredential
+from app.models import (
+    Bill,
+    DedupLink,
+    Entry,
+    InternalTransferLink,
+    Person,
+    SourceCredential,
+)
 from app.security.crypto import decrypt_payload, encrypt_payload
 from app.services import households as household_service
 from app.services.classify import (
@@ -38,6 +45,39 @@ def _latest_occurred_at(person_id: int, source_type: str) -> datetime | None:
         .first()
     )
     return row.occurred_at if row else None
+
+
+def _delete_bills_since(
+    *, person_id: int, source_type: str, since: datetime
+) -> int:
+    """Full-sync replacement: remove a source's bills at/after `since`.
+
+    Older bills (before the source's lookback window) are preserved. Everything
+    at/after the window start is replaced by the freshly fetched result.
+    """
+    rows = Bill.query.filter(
+        Bill.person_id == person_id,
+        Bill.source_type == source_type,
+        Bill.occurred_at >= since,
+    ).all()
+    if not rows:
+        return 0
+    ids = [row.id for row in rows]
+    DedupLink.query.filter(
+        (DedupLink.primary_bill_id.in_(ids))
+        | (DedupLink.secondary_bill_id.in_(ids))
+    ).delete(synchronize_session=False)
+    InternalTransferLink.query.filter(
+        (InternalTransferLink.outgoing_bill_id.in_(ids))
+        | (InternalTransferLink.incoming_bill_id.in_(ids))
+    ).delete(synchronize_session=False)
+    Bill.query.filter(Bill.dedup_primary_id.in_(ids)).update(
+        {Bill.dedup_primary_id: None}, synchronize_session=False
+    )
+    Entry.query.filter(Entry.bill_id.in_(ids)).delete(synchronize_session=False)
+    Bill.query.filter(Bill.id.in_(ids)).delete(synchronize_session=False)
+    db.session.flush()
+    return len(ids)
 
 
 def _runtime_credential(
@@ -145,6 +185,13 @@ def sync_coles_source(
         cred_row.payload_encrypted = encrypt_payload(payload)
     cred_row.last_validated_at = datetime.utcnow()
 
+    if full_sync and drafts:
+        _delete_bills_since(
+            person_id=person_id,
+            source_type="coles",
+            since=min(draft.occurred_at for draft in drafts),
+        )
+
     result = _persist_drafts(
         person_id=person_id,
         household_id=household.id,
@@ -225,6 +272,12 @@ def sync_wws_source(
     cred_row.payload_encrypted = encrypt_payload(payload)
     if since is not None:
         drafts = [draft for draft in drafts if draft.occurred_at > since]
+    if full_sync and drafts:
+        _delete_bills_since(
+            person_id=person_id,
+            source_type="wws",
+            since=min(draft.occurred_at for draft in drafts),
+        )
     result = _persist_drafts(
         person_id=person_id,
         household_id=household.id,
@@ -348,6 +401,13 @@ def sync_commbank_source(
         cred_row.payload_encrypted = encrypt_payload(payload)
 
     cred_row.last_validated_at = datetime.utcnow()
+
+    if full_sync and drafts:
+        _delete_bills_since(
+            person_id=person_id,
+            source_type="commbank",
+            since=min(draft.occurred_at for draft in drafts),
+        )
 
     result = _persist_drafts(
         person_id=person_id,
