@@ -33,6 +33,8 @@ categories:
     label: 利息收入
   - id: family_support
     label: 家庭资助
+  - id: investment
+    label: 投资
   - id: transfer
     label: 转账不计收支
   - id: review

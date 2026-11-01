@@ -145,6 +145,14 @@ export function CategoryIcon({ id, className }: Props) {
           <path d="M19 14c1.5-1.5 3-3.3 3-5.5A4.5 4.5 0 0 0 12 6 4.5 4.5 0 0 0 2 8.5c0 2.2 1.5 4 3 5.5l7 7Z" />
         </Svg>
       );
+    case "investment":
+      return (
+        <Svg className={className}>
+          <path d="M3 3v18h18" />
+          <path d="m7 14 4-4 3 3 5-6" />
+          <path d="M15 7h4v4" />
+        </Svg>
+      );
     case "transfer":
       return (
         <Svg className={className}>
