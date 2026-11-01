@@ -28,7 +28,6 @@ export function SourceCredentialPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<JobProgress | null>(null);
   const [connecting, setConnecting] = useState(false);
-  const [showFullSync, setShowFullSync] = useState(false);
   const sourceStatus = useSourceStatus();
 
   const [refreshToken, setRefreshToken] = useState("");
@@ -205,14 +204,14 @@ export function SourceCredentialPage() {
     }
   }
 
-  async function sync(fullSync = false) {
+  async function sync() {
     if (!personId) return;
     setError("");
     setMessage("");
     setSyncing(true);
     setSyncProgress({
       percent: 0,
-      message: fullSync ? "全量同步任务已排队…" : "增量同步任务已排队…",
+      message: "增量同步任务已排队…",
     });
     try {
       const path =
@@ -224,7 +223,7 @@ export function SourceCredentialPage() {
       const body = {
         person_id: personId,
         async: true,
-        full_sync: fullSync,
+        full_sync: false,
       };
 
       const started = await api<{
@@ -285,40 +284,14 @@ export function SourceCredentialPage() {
         : "bg-ink-200";
 
   const syncButtons = (
-    <div className="relative inline-flex">
-      <div className="inline-flex">
-        <button
-          type="button"
-          className="btn-primary rounded-r-none"
-          onClick={() => sync(false)}
-          disabled={syncing}
-        >
-          {syncing ? "同步中…" : "增量同步"}
-        </button>
-        <button
-          type="button"
-          className="btn-primary rounded-l-none border-l border-ink-500 px-2.5"
-          onClick={() => setShowFullSync((v) => !v)}
-          disabled={syncing}
-          aria-label="显示全量同步"
-        >
-          ▾
-        </button>
-      </div>
-      {showFullSync && (
-        <button
-          type="button"
-          className="btn-ghost absolute left-0 top-full mt-1 whitespace-nowrap"
-          onClick={() => {
-            setShowFullSync(false);
-            sync(true);
-          }}
-          disabled={syncing}
-        >
-          全量同步
-        </button>
-      )}
-    </div>
+    <button
+      type="button"
+      className="btn-primary"
+      onClick={() => sync()}
+      disabled={syncing}
+    >
+      {syncing ? "同步中…" : "增量同步"}
+    </button>
   );
 
   return (

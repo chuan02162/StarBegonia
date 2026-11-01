@@ -272,8 +272,8 @@ def _parse_sync_since(value: Any) -> datetime | None:
 
 def _pick_datetime(txn: dict[str, Any]) -> datetime | None:
     for key in (
-        "postedDateTime",
         "executionDateTime",
+        "postedDateTime",
         "valueDate",
         "transactionDate",
         "date",
