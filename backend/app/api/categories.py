@@ -12,6 +12,7 @@ from app.jobs.progress import job_progress_payload
 from app.jobs.queues import default_queue
 from app.models import ClassificationRule
 from app.services import classify as classify_service
+from app.services import dedup as dedup_service
 from app.services import households as household_service
 from app.services.categories import get_vocabulary
 from app.services.classification_rules import (
@@ -218,26 +219,72 @@ def pending_entries():
     person = current_person()
     limit = request.args.get("limit", default=50, type=int)
     offset = request.args.get("offset", default=0, type=int)
+    account_person_id = request.args.get("account_person_id", type=int)
+    account = request.args.get("account")
     entries = classify_service.list_pending_entries(
-        viewer_person_id=person.id, limit=limit, offset=offset
+        viewer_person_id=person.id, limit=2000, offset=0
     )
+    peer_map = dedup_service.commbank_peer_for(
+        [e.bill for e in entries if e.bill]
+    )
+
+    items: list[dict] = []
+    for e in entries:
+        b = e.bill
+        if not b:
+            items.append(
+                {**e.to_dict(), "bill": None, "account": None, "account_person_id": None}
+            )
+            continue
+        peer = peer_map.get(b.id)
+        acct, acct_person = dedup_service.display_account(b, peer)
+        items.append(
+            {
+                **e.to_dict(),
+                "bill": {
+                    "id": b.id,
+                    "merchant": b.merchant,
+                    "source_type": b.source_type,
+                    "occurred_at": b.occurred_at.isoformat() + "Z",
+                    "currency": b.currency,
+                    "person_id": b.person_id,
+                    "account": acct,
+                    "account_person_id": acct_person,
+                },
+            }
+        )
+
+    seen: dict[tuple[int | None, str], bool] = {}
+    for it in items:
+        bill = it.get("bill")
+        if not bill or not bill.get("account"):
+            continue
+        key = (bill.get("account_person_id"), bill["account"])
+        seen.setdefault(key, True)
+    accounts = [
+        {"account_person_id": pid, "account": acct}
+        for pid, acct in sorted(seen.keys(), key=lambda k: (k[0] or 0, k[1] or ""))
+    ]
+
+    if account_person_id is not None:
+        items = [
+            it
+            for it in items
+            if it.get("bill") and it["bill"].get("account_person_id") == account_person_id
+        ]
+    if account:
+        items = [
+            it for it in items if it.get("bill") and it["bill"].get("account") == account
+        ]
+
+    total = len(items)
+    page = items[max(offset, 0) : max(offset, 0) + min(max(limit, 1), 200)]
     return jsonify(
         {
-            "entries": [
-                {
-                    **e.to_dict(),
-                    "bill": {
-                        "id": e.bill.id,
-                        "merchant": e.bill.merchant,
-                        "source_type": e.bill.source_type,
-                        "occurred_at": e.bill.occurred_at.isoformat() + "Z",
-                        "currency": e.bill.currency,
-                    }
-                    if e.bill
-                    else None,
-                }
-                for e in entries
-            ]
+            "entries": page,
+            "accounts": accounts,
+            "has_more": max(offset, 0) + len(page) < total,
+            "total": total,
         }
     )
 

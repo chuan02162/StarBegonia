@@ -20,6 +20,8 @@ def list_bills():
     q = request.args.get("q")
     date_from = request.args.get("date_from") or request.args.get("from")
     date_to = request.args.get("date_to") or request.args.get("to")
+    account_person_id = request.args.get("account_person_id", type=int)
+    account = request.args.get("account")
     limit = request.args.get("limit", default=40, type=int)
     offset = request.args.get("offset", default=0, type=int)
     try:
@@ -32,6 +34,8 @@ def list_bills():
             q=q,
             date_from=date_from,
             date_to=date_to,
+            account_person_id=account_person_id,
+            account=account,
             limit=limit,
             offset=offset,
         )
@@ -43,15 +47,14 @@ def list_bills():
     for b in bills:
         data = b.to_dict()
         peer = peer_map.get(b.id)
-        if peer:
-            data["account"] = peer.account
-            data["account_person_id"] = peer.person_id
-        else:
-            data["account_person_id"] = b.person_id
+        account, account_person_id = dedup_service.display_account(b, peer)
+        data["account"] = account
+        data["account_person_id"] = account_person_id
         payload.append(data)
     return jsonify(
         {
             "bills": payload,
+            "accounts": bills_service.account_options(person.id),
             "has_more": result["has_more"],
             "limit": result["limit"],
             "offset": result["offset"],

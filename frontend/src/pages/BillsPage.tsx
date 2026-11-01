@@ -8,7 +8,13 @@ import {
   formatOccurredAt,
   moneyClass,
 } from "../lib/format";
-import type { Bill, CategoryItem, HouseholdMember, Vocabulary } from "../types";
+import type {
+  AccountOption,
+  Bill,
+  CategoryItem,
+  HouseholdMember,
+  Vocabulary,
+} from "../types";
 
 const PAGE_SIZE = 40;
 const TAG_COLORS = [
@@ -31,6 +37,12 @@ export function BillsPage() {
     searchParams.get("category_id") || "",
   );
   const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [accountFilter, setAccountFilter] = useState(() => {
+    const pid = searchParams.get("account_person_id");
+    const acct = searchParams.get("account");
+    return pid ? `${pid}|${acct || ""}` : "";
+  });
   const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || "");
   const [dateTo, setDateTo] = useState(searchParams.get("date_to") || "");
   const [searchInput, setSearchInput] = useState(searchParams.get("q") || "");
@@ -50,8 +62,21 @@ export function BillsPage() {
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
     if (search) params.set("q", search);
+    if (accountFilter) {
+      const [pid, ...rest] = accountFilter.split("|");
+      if (pid) params.set("account_person_id", pid);
+      if (rest.length) params.set("account", rest.join("|"));
+    }
     setSearchParams(params, { replace: true });
-  }, [source, categoryId, dateFrom, dateTo, search, setSearchParams]);
+  }, [
+    source,
+    categoryId,
+    dateFrom,
+    dateTo,
+    search,
+    accountFilter,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     api<Vocabulary>("/api/v1/categories").then((v) =>
@@ -85,7 +110,7 @@ export function BillsPage() {
     setBills([]);
     setOffset(0);
     setHasMore(false);
-  }, [source, categoryId, dateFrom, dateTo, search]);
+  }, [source, categoryId, dateFrom, dateTo, search, accountFilter]);
 
   const loadPage = useCallback(
     async (pageOffset: number, append: boolean) => {
@@ -101,12 +126,19 @@ export function BillsPage() {
         if (dateFrom) params.set("date_from", dateFrom);
         if (dateTo) params.set("date_to", dateTo);
         if (search) params.set("q", search);
+        if (accountFilter) {
+          const [pid, ...rest] = accountFilter.split("|");
+          if (pid) params.set("account_person_id", pid);
+          if (rest.length) params.set("account", rest.join("|"));
+        }
         const data = await api<{
           bills: Bill[];
           has_more: boolean;
           offset: number;
+          accounts: AccountOption[];
         }>(`/api/v1/bills?${params}`);
         if (id !== requestId.current) return;
+        setAccounts(data.accounts || []);
         setBills((prev) => (append ? [...prev, ...data.bills] : data.bills));
         setHasMore(Boolean(data.has_more));
         setOffset(pageOffset + data.bills.length);
@@ -117,7 +149,7 @@ export function BillsPage() {
         }
       }
     },
-    [source, categoryId, dateFrom, dateTo, search],
+    [source, categoryId, dateFrom, dateTo, search, accountFilter],
   );
 
   useEffect(() => {
@@ -183,6 +215,27 @@ export function BillsPage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
+        <label className="block">
+          <span className="mb-1.5 block text-sm text-ink-600">账户来源</span>
+          <select
+            className="field py-1.5"
+            value={accountFilter}
+            onChange={(e) => setAccountFilter(e.target.value)}
+          >
+            <option value="">全部账户</option>
+            {accounts.map((a) => {
+              const person = a.account_person_id
+                ? personMap[a.account_person_id]
+                : undefined;
+              const value = `${a.account_person_id ?? ""}|${a.account}`;
+              return (
+                <option key={value} value={value}>
+                  {person?.name || "未知用户"} · {a.account}
+                </option>
+              );
+            })}
+          </select>
+        </label>
         <label className="block">
           <span className="mb-1.5 block text-sm text-ink-600">从</span>
           <input

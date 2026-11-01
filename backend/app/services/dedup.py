@@ -317,6 +317,18 @@ def commbank_peer_for(bills: list[Bill]) -> dict[int, Bill]:
     return result
 
 
+def display_account(bill: Bill, peer: Bill | None) -> tuple[str | None, int]:
+    """Account label and owning person shown on a bill tag.
+
+    Retail receipts that did not match a bank transaction are treated as cash.
+    """
+    if peer:
+        return peer.account, peer.person_id
+    if bill.source_type in {"coles", "wws"}:
+        return "现金", bill.person_id
+    return bill.account, bill.person_id
+
+
 def list_links(
     *,
     person_id: int,

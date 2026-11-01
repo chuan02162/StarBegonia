@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api } from "../api/client";
 import { CategoryChip, CategoryPicker } from "../components/CategoryPicker";
@@ -6,7 +6,24 @@ import { JobProgressBar } from "../components/JobProgressBar";
 import { SourceLogo } from "../components/SourceLogo";
 import { formatMoney, formatOccurredAt } from "../lib/format";
 import { pollJob, type JobProgress } from "../lib/jobs";
-import type { CategoryItem, PendingEntry, Vocabulary } from "../types";
+import type {
+  AccountOption,
+  CategoryItem,
+  HouseholdMember,
+  PendingEntry,
+  Vocabulary,
+} from "../types";
+
+const TAG_COLORS = [
+  "#2563eb",
+  "#7c3aed",
+  "#db2777",
+  "#ea580c",
+  "#16a34a",
+  "#0891b2",
+  "#ca8a04",
+  "#dc2626",
+];
 
 export function CategoriesPage() {
   const [pending, setPending] = useState<PendingEntry[]>([]);
@@ -17,20 +34,49 @@ export function CategoriesPage() {
   const [batchMsg, setBatchMsg] = useState("");
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState<JobProgress | null>(null);
+  const [members, setMembers] = useState<HouseholdMember[]>([]);
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [accountFilter, setAccountFilter] = useState("");
 
   const load = useCallback(() => {
+    const params = new URLSearchParams();
+    if (accountFilter) {
+      const [pid, ...rest] = accountFilter.split("|");
+      const acct = rest.join("|");
+      if (pid) params.set("account_person_id", pid);
+      if (acct) params.set("account", acct);
+    }
     return Promise.all([
-      api<{ entries: PendingEntry[] }>("/api/v1/categories/pending"),
+      api<{ entries: PendingEntry[]; accounts: AccountOption[] }>(
+        `/api/v1/categories/pending${params.toString() ? `?${params}` : ""}`,
+      ),
       api<Vocabulary>("/api/v1/categories"),
-    ]).then(([p, v]) => {
+      api<{ household: { members?: HouseholdMember[] } | null }>(
+        "/api/v1/households/me",
+      ),
+    ]).then(([p, v, h]) => {
       setPending(p.entries);
       setVocab(v);
+      setAccounts(p.accounts || []);
+      setMembers(h.household?.members || []);
     });
-  }, []);
+  }, [accountFilter]);
 
   useEffect(() => {
     load().catch(() => setError("加载失败"));
   }, [load]);
+
+  const personMap = useMemo(() => {
+    const sorted = [...members].sort((a, b) => a.person_id - b.person_id);
+    const map: Record<number, { name: string; color: string }> = {};
+    sorted.forEach((member, index) => {
+      map[member.person_id] = {
+        name: member.display_name || `用户${index + 1}`,
+        color: TAG_COLORS[index % TAG_COLORS.length],
+      };
+    });
+    return map;
+  }, [members]);
 
   async function selectCategory(categoryId: string | null) {
     if (!pickerEntry) return;
@@ -142,14 +188,38 @@ export function CategoriesPage() {
             Jev 低置信度建议；点分类可改选，右侧绿色对号确认当前建议
           </p>
         </div>
-        <button
-          type="button"
-          className="btn-ghost"
-          onClick={runBatch}
-          disabled={batchRunning || pending.length === 0}
-        >
-          {batchRunning ? "分类中…" : "对未分类条目跑 Jev"}
-        </button>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="mb-1.5 block text-sm text-ink-600">账户来源</span>
+            <select
+              className="field py-1.5"
+              value={accountFilter}
+              onChange={(e) => setAccountFilter(e.target.value)}
+            >
+              <option value="">全部账户</option>
+              {accounts.map((a) => {
+                const person = a.account_person_id
+                  ? personMap[a.account_person_id]
+                  : undefined;
+                const name = person?.name || "未知用户";
+                const value = `${a.account_person_id ?? ""}|${a.account}`;
+                return (
+                  <option key={value} value={value}>
+                    {name} · {a.account}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={runBatch}
+            disabled={batchRunning || pending.length === 0}
+          >
+            {batchRunning ? "分类中…" : "对未分类条目跑 Jev"}
+          </button>
+        </div>
       </div>
 
       {batchMsg && <p className="text-sm text-ink-500">{batchMsg}</p>}
@@ -165,6 +235,7 @@ export function CategoriesPage() {
             entry={e}
             label={catLabel(e.category_id)}
             busy={busyId === e.id}
+            personMap={personMap}
             onOpenPicker={() => setPickerEntry(e)}
             onConfirm={() => confirmSuggested(e)}
           />
@@ -190,12 +261,14 @@ function PendingRow({
   entry,
   label,
   busy,
+  personMap,
   onOpenPicker,
   onConfirm,
 }: {
   entry: PendingEntry;
   label: string;
   busy: boolean;
+  personMap: Record<number, { name: string; color: string }>;
   onOpenPicker: () => void;
   onConfirm: () => void;
 }) {
@@ -216,6 +289,24 @@ function PendingRow({
             <p className="mt-1 text-sm text-ink-400">
               {entry.bill ? (
                 <>
+                  {(() => {
+                    const pid = entry.bill.account_person_id ?? entry.bill.person_id;
+                    const person = pid ? personMap[pid] : undefined;
+                    const account = entry.bill.account?.trim();
+                    const tagLabel = person
+                      ? account
+                        ? `${person.name} · ${account}`
+                        : person.name
+                      : null;
+                    return tagLabel ? (
+                      <span
+                        className="mr-2 inline-flex max-w-[16rem] truncate rounded px-1.5 py-0.5 align-middle text-xs font-medium text-white"
+                        style={{ backgroundColor: person?.color }}
+                      >
+                        {tagLabel}
+                      </span>
+                    ) : null;
+                  })()}
                   <Link
                     to={`/bills/${entry.bill.id}`}
                     className="text-ink-600 hover:text-ink-800"

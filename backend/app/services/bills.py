@@ -64,6 +64,8 @@ def list_bills(
     q: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    account_person_id: int | None = None,
+    account: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -100,6 +102,29 @@ def list_bills(
         query = query.distinct()
 
     page_size = min(max(limit, 1), 200)
+
+    if account_person_id is not None or account:
+        from app.services import dedup as dedup_service
+
+        rows = query.order_by(Bill.occurred_at.desc(), Bill.id.desc()).all()
+        peer_map = dedup_service.commbank_peer_for(rows)
+        matched = []
+        for b in rows:
+            acct, acct_person = dedup_service.display_account(b, peer_map.get(b.id))
+            if account_person_id is not None and acct_person != account_person_id:
+                continue
+            if account and acct != account:
+                continue
+            matched.append(b)
+        page = matched[max(offset, 0) : max(offset, 0) + page_size]
+        has_more = max(offset, 0) + len(page) < len(matched)
+        return {
+            "bills": page,
+            "has_more": has_more,
+            "limit": page_size,
+            "offset": offset,
+        }
+
     rows = (
         query.order_by(Bill.occurred_at.desc(), Bill.id.desc())
         .offset(max(offset, 0))
@@ -108,6 +133,23 @@ def list_bills(
     )
     has_more = len(rows) > page_size
     return {"bills": rows[:page_size], "has_more": has_more, "limit": page_size, "offset": offset}
+
+
+def account_options(viewer_person_id: int) -> list[dict[str, Any]]:
+    """Distinct user + account labels across the viewer's visible bills."""
+    from app.services import dedup as dedup_service
+
+    bills = household_service.visible_bills_query(viewer_person_id).all()
+    peer_map = dedup_service.commbank_peer_for(bills)
+    seen: dict[tuple[int, str], bool] = {}
+    for b in bills:
+        acct, acct_person = dedup_service.display_account(b, peer_map.get(b.id))
+        if acct:
+            seen[(acct_person, acct)] = True
+    return [
+        {"account_person_id": pid, "account": acct}
+        for pid, acct in sorted(seen.keys(), key=lambda k: (k[0], k[1] or ""))
+    ]
 
 
 def get_bill(bill_id: int, *, viewer_person_id: int) -> Bill:

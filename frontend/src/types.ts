@@ -228,5 +228,13 @@ export type PendingEntry = Entry & {
     source_type: string;
     occurred_at: string;
     currency: string;
+    person_id?: number | null;
+    account?: string | null;
+    account_person_id?: number | null;
   } | null;
+};
+
+export type AccountOption = {
+  account_person_id: number | null;
+  account: string;
 };

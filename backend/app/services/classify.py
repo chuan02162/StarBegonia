@@ -410,7 +410,7 @@ def list_pending_entries(
         )
         .order_by(Entry.id.desc())
         .offset(offset)
-        .limit(min(limit, 200))
+        .limit(min(limit, 2000))
         .all()
     )
 
