@@ -89,7 +89,7 @@ export function DedupPage() {
         </p>
         <h1 className="mt-2 font-display text-3xl text-ink-800">已去重账单对</h1>
         <p className="mt-2 max-w-xl text-ink-500">
-          同步后按金额与时间自动配对（Coles / 手动 ↔ CommBank）。从记录只在此处显示，
+          同步后按金额与时间自动配对（Coles / Woolworths / 手动 ↔ CommBank）。从记录只在此处显示，
           不会出现在流水、概览或 AA 结算中。
         </p>
       </div>

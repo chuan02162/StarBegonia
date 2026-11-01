@@ -16,6 +16,7 @@ STATUS_IGNORED = "ignored"  # legacy; treated as free to re-match
 # Prefer detailed retail/manual as primary over bank feed.
 _SOURCE_RANK = {
     "coles": 30,
+    "wws": 30,
     "manual": 20,
     "commbank": 10,
 }
@@ -144,8 +145,32 @@ def _promote_legacy_suggestions(household_id: int) -> int:
     return promoted
 
 
+def _normalize_primary_secondary(household_id: int) -> int:
+    """Flip already-linked pairs whose primary/secondary assignment no longer
+    matches the current source rank (e.g. WWS receipts linked before ``wws``
+    was ranked above CommBank)."""
+    fixed = 0
+    rows = DedupLink.query.filter_by(
+        household_id=household_id, status=STATUS_LINKED
+    ).all()
+    for link in rows:
+        primary = db.session.get(Bill, link.primary_bill_id)
+        secondary = db.session.get(Bill, link.secondary_bill_id)
+        if not primary or not secondary:
+            continue
+        want_primary, want_secondary = assign_primary_secondary(primary, secondary)
+        if want_primary.id == primary.id:
+            continue
+        _apply_linked(link, want_primary, want_secondary)
+        fixed += 1
+    if fixed:
+        db.session.commit()
+    return fixed
+
+
 def scan_household(household_id: int) -> dict[str, Any]:
     promoted = _promote_legacy_suggestions(household_id)
+    normalized = _normalize_primary_secondary(household_id)
 
     bills = (
         Bill.query.filter_by(household_id=household_id)
@@ -229,6 +254,7 @@ def scan_household(household_id: int) -> dict[str, Any]:
         "created": created,
         "refreshed": refreshed,
         "promoted": promoted,
+        "normalized": normalized,
     }
 
 
@@ -238,6 +264,57 @@ def scan_for_person(person_id: int) -> dict[str, Any]:
     except AaRuleError as exc:
         raise DedupError(exc.message, exc.status_code) from exc
     return scan_household(hh.id)
+
+
+def linked_peer(bill_id: int) -> Bill | None:
+    """Return the other bill in a linked dedup pair, if any."""
+    link = DedupLink.query.filter(
+        DedupLink.status == STATUS_LINKED,
+        db.or_(
+            DedupLink.primary_bill_id == bill_id,
+            DedupLink.secondary_bill_id == bill_id,
+        ),
+    ).first()
+    if not link:
+        return None
+    if link.primary_bill_id == bill_id:
+        return db.session.get(Bill, link.secondary_bill_id)
+    return db.session.get(Bill, link.primary_bill_id)
+
+
+def commbank_peer_for(bills: list[Bill]) -> dict[int, Bill]:
+    """Map retail/manual bill ids to their linked CommBank peer bill."""
+    ids = [b.id for b in bills]
+    if not ids:
+        return {}
+
+    links = DedupLink.query.filter(
+        DedupLink.status == STATUS_LINKED,
+        db.or_(
+            DedupLink.primary_bill_id.in_(ids),
+            DedupLink.secondary_bill_id.in_(ids),
+        ),
+    ).all()
+    peer_id_by_bill: dict[int, int] = {}
+    for link in links:
+        peer_id_by_bill[link.primary_bill_id] = link.secondary_bill_id
+        peer_id_by_bill[link.secondary_bill_id] = link.primary_bill_id
+
+    peer_ids = set(peer_id_by_bill.values())
+    peers = (
+        {b.id: b for b in Bill.query.filter(Bill.id.in_(peer_ids)).all()}
+        if peer_ids
+        else {}
+    )
+
+    result: dict[int, Bill] = {}
+    for bill in bills:
+        if bill.source_type == "commbank":
+            continue
+        peer = peers.get(peer_id_by_bill.get(bill.id))
+        if peer and peer.source_type == "commbank":
+            result[bill.id] = peer
+    return result
 
 
 def list_links(

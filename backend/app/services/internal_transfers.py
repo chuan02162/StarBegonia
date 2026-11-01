@@ -153,7 +153,6 @@ def scan_household(household_id: int) -> dict[str, Any]:
     bills = (
         Bill.query.filter_by(household_id=household_id, source_type="commbank")
         .order_by(Bill.occurred_at.desc())
-        .limit(800)
         .all()
     )
 

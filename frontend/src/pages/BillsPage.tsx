@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { SOURCE_LABELS, SourceLogo } from "../components/SourceLogo";
@@ -8,13 +8,24 @@ import {
   formatOccurredAt,
   moneyClass,
 } from "../lib/format";
-import type { Bill, CategoryItem, Vocabulary } from "../types";
+import type { Bill, CategoryItem, HouseholdMember, Vocabulary } from "../types";
 
 const PAGE_SIZE = 40;
+const TAG_COLORS = [
+  "#2563eb",
+  "#7c3aed",
+  "#db2777",
+  "#ea580c",
+  "#16a34a",
+  "#0891b2",
+  "#ca8a04",
+  "#dc2626",
+];
 
 export function BillsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [bills, setBills] = useState<Bill[]>([]);
+  const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [source, setSource] = useState(searchParams.get("source_type") || "");
   const [categoryId, setCategoryId] = useState(
     searchParams.get("category_id") || "",
@@ -46,7 +57,22 @@ export function BillsPage() {
     api<Vocabulary>("/api/v1/categories").then((v) =>
       setCategories(v.categories || []),
     );
+    api<{ household: { members?: HouseholdMember[] } | null }>(
+      "/api/v1/households/me",
+    ).then((d) => setMembers(d.household?.members || []));
   }, []);
+
+  const personMap = useMemo(() => {
+    const sorted = [...members].sort((a, b) => a.person_id - b.person_id);
+    const map: Record<number, { name: string; color: string }> = {};
+    sorted.forEach((member, index) => {
+      map[member.person_id] = {
+        name: member.display_name || `用户${index + 1}`,
+        color: TAG_COLORS[index % TAG_COLORS.length],
+      };
+    });
+    return map;
+  }, [members]);
 
   // Debounce search
   useEffect(() => {
@@ -201,34 +227,53 @@ export function BillsPage() {
       </div>
 
       <ul className="divide-y divide-ink-100">
-        {bills.map((b) => (
-          <li key={b.id}>
-            <Link
-              to={`/bills/${b.id}`}
-              className="flex items-center gap-4 py-5 transition-colors hover:bg-ink-50/60"
-            >
-              <SourceLogo source={b.source_type} className="h-9 w-9" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-lg text-ink-800">
-                  {b.merchant || "未命名商户"}
-                </p>
-                <p className="text-sm text-ink-400">
-                  {formatOccurredAt(b.occurred_at)}
-                  {b.entries?.length ? ` · ${b.entries.length} 项` : ""}
-                </p>
-              </div>
-              <p
-                className={`shrink-0 font-medium tabular-nums ${moneyClass(
-                  billLooksLikeIncome(b.entries, b.total_amount),
-                )}`}
+        {bills.map((b) => {
+          const person = personMap[b.account_person_id ?? b.person_id];
+          const account = b.account?.trim();
+          const tagLabel = person
+            ? account
+              ? `${person.name} · ${account}`
+              : person.name
+            : null;
+          return (
+            <li key={b.id}>
+              <Link
+                to={`/bills/${b.id}`}
+                className="flex items-center gap-4 py-5 transition-colors hover:bg-ink-50/60"
               >
-                {formatMoneySigned(b.total_amount, b.currency, {
-                  income: billLooksLikeIncome(b.entries, b.total_amount),
-                })}
-              </p>
-            </Link>
-          </li>
-        ))}
+                <SourceLogo source={b.source_type} className="h-9 w-9" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    {tagLabel && (
+                      <span
+                        className="max-w-[16rem] shrink-0 truncate rounded px-1.5 py-0.5 text-xs font-medium text-white"
+                        style={{ backgroundColor: person?.color }}
+                      >
+                        {tagLabel}
+                      </span>
+                    )}
+                    <p className="truncate text-lg text-ink-800">
+                      {b.merchant || "未命名商户"}
+                    </p>
+                  </div>
+                  <p className="text-sm text-ink-400">
+                    {formatOccurredAt(b.occurred_at)}
+                    {b.entries?.length ? ` · ${b.entries.length} 项` : ""}
+                  </p>
+                </div>
+                <p
+                  className={`shrink-0 font-medium tabular-nums ${moneyClass(
+                    billLooksLikeIncome(b.entries, b.total_amount),
+                  )}`}
+                >
+                  {formatMoneySigned(b.total_amount, b.currency, {
+                    income: billLooksLikeIncome(b.entries, b.total_amount),
+                  })}
+                </p>
+              </Link>
+            </li>
+          );
+        })}
       </ul>
 
       {loading && bills.length === 0 && (

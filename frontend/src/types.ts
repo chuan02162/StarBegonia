@@ -50,6 +50,8 @@ export type Bill = {
   merchant: string | null;
   currency: string;
   note: string | null;
+  account?: string | null;
+  account_person_id?: number | null;
   total_amount: string;
   dedup_status?: DedupStatus | string;
   dedup_primary_id?: number | null;

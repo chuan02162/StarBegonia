@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, api } from "../api/client";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { CategoryChip, CategoryPicker } from "../components/CategoryPicker";
-import { SourceLogo } from "../components/SourceLogo";
+import { SOURCE_LABELS, SourceLogo } from "../components/SourceLogo";
 import {
   billLooksLikeIncome,
   formatEntryQty,
@@ -13,18 +13,24 @@ import {
   isIncomeAmount,
   moneyClass,
 } from "../lib/format";
-import type { Bill, CategoryItem, Entry, Vocabulary } from "../types";
+import type { Bill, BillSummary, CategoryItem, Entry, Vocabulary } from "../types";
 
 export function BillDetailPage() {
   const { billId } = useParams();
   const navigate = useNavigate();
   const [bill, setBill] = useState<Bill | null>(null);
+  const [peer, setPeer] = useState<BillSummary | null>(null);
   const [vocab, setVocab] = useState<Vocabulary | null>(null);
   const [error, setError] = useState("");
 
   const reload = useCallback(() => {
     if (!billId) return Promise.resolve();
-    return api<{ bill: Bill }>(`/api/v1/bills/${billId}`).then((d) => setBill(d.bill));
+    return api<{ bill: Bill; dedup_peer: BillSummary | null }>(
+      `/api/v1/bills/${billId}`,
+    ).then((d) => {
+      setBill(d.bill);
+      setPeer(d.dedup_peer);
+    });
   }, [billId]);
 
   useEffect(() => {
@@ -107,6 +113,30 @@ export function BillDetailPage() {
           )}
         </div>
       </div>
+
+      {peer && (
+        <section className="rounded-lg border border-ink-100 bg-ink-50/60 p-4">
+          <h2 className="text-xs uppercase tracking-wide text-ink-400">
+            已与银行账单去重
+          </h2>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <SourceLogo source={peer.source_type} className="h-8 w-8" />
+            <div className="min-w-0">
+              <p className="font-medium text-ink-800">
+                {peer.merchant || `账单 #${peer.id}`}
+              </p>
+              <p className="text-sm text-ink-500">
+                {SOURCE_LABELS[peer.source_type] || peer.source_type}
+                <span className="mx-1.5">·</span>
+                {formatOccurredAt(peer.occurred_at)}
+              </p>
+            </div>
+            <p className="ml-auto tabular-nums text-ink-800">
+              {formatMoney(peer.total_amount, peer.currency)}
+            </p>
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="font-display text-xl text-ink-800">明细</h2>

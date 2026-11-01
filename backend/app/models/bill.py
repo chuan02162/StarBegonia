@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -55,6 +56,20 @@ class Bill(db.Model):
     def total_amount(self) -> Decimal:
         return sum((e.amount for e in self.entries), Decimal("0"))
 
+    @property
+    def account(self) -> str | None:
+        """Friendly account/card label shown in the UI for this source."""
+        note = self.note or ""
+        if self.source_type == "commbank":
+            match = re.search(r"(?:^|;\s*)account=([^;]+)", note)
+            return match.group(1).strip() if match else None
+        if self.source_type == "coles":
+            match = re.search(r"(?:^|;\s*)flybuys=([^;]+)", note)
+            return f"Flybuys {match.group(1).strip()}" if match else None
+        if self.source_type == "wws":
+            return "Everyday Rewards"
+        return None
+
     def to_dict(self, *, include_entries: bool = True) -> dict:
         data = {
             "id": self.id,
@@ -66,6 +81,7 @@ class Bill(db.Model):
             "currency": self.currency,
             "external_id": self.external_id,
             "note": self.note,
+            "account": self.account,
             "dedup_status": self.dedup_status,
             "dedup_primary_id": self.dedup_primary_id,
             "total_amount": str(self.total_amount),

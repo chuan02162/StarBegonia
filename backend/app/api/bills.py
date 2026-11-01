@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from app.api.deps import current_person, login_required
 from app.services import bills as bills_service
+from app.services import dedup as dedup_service
 
 bp = Blueprint("bills", __name__)
 
@@ -36,9 +37,21 @@ def list_bills():
         )
     except bills_service.BillsError as exc:
         return jsonify({"error": exc.message}), exc.status_code
+    bills = result["bills"]
+    peer_map = dedup_service.commbank_peer_for(bills)
+    payload = []
+    for b in bills:
+        data = b.to_dict()
+        peer = peer_map.get(b.id)
+        if peer:
+            data["account"] = peer.account
+            data["account_person_id"] = peer.person_id
+        else:
+            data["account_person_id"] = b.person_id
+        payload.append(data)
     return jsonify(
         {
-            "bills": [b.to_dict() for b in result["bills"]],
+            "bills": payload,
             "has_more": result["has_more"],
             "limit": result["limit"],
             "offset": result["offset"],
@@ -54,7 +67,13 @@ def get_bill(bill_id: int):
         bill = bills_service.get_bill(bill_id, viewer_person_id=person.id)
     except bills_service.BillsError as exc:
         return jsonify({"error": exc.message}), exc.status_code
-    return jsonify({"bill": bill.to_dict()})
+    peer = dedup_service.linked_peer(bill.id)
+    return jsonify(
+        {
+            "bill": bill.to_dict(),
+            "dedup_peer": peer.to_dict(include_entries=False) if peer else None,
+        }
+    )
 
 
 @bp.post("")
