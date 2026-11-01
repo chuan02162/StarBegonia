@@ -14,9 +14,7 @@ from app.services.categories import get_vocabulary
 
 Granularity = Literal["week", "month", "quarter", "year"]
 
-# Legacy helpers — polarity is amount sign (positive = in, negative = out).
-# Kept for internal-transfer heuristics / settlements filters.
-INCOME_IDS = {"salary", "interest", "income", "income_other"}
+# Hardcoded categories excluded from all analytics aggregates.
 EXCLUDE_IDS = {"transfer", "review"}
 
 
@@ -104,14 +102,12 @@ def overview(
         )
 
     cat_labels: dict[str, str] = {}
-    cat_kind: dict[str, str] = {}
     try:
         vocab = get_vocabulary()
         for c in (vocab.get("categories") or []):
             if not c.get("id"):
                 continue
             cat_labels[c["id"]] = c.get("label") or c["id"]
-            cat_kind[c["id"]] = c.get("kind") or "expense"
     except FileNotFoundError:
         pass
 
@@ -160,8 +156,6 @@ def overview(
     def _category_list(bucket: dict[str, Decimal]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for cid, net in bucket.items():
-            if cat_kind.get(cid, "expense") != "expense":
-                continue
             amount = max(Decimal("0"), -net)
             if amount <= 0:
                 continue

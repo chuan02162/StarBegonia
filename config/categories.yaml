@@ -11,43 +11,31 @@ aa_residual:
 categories:
   - id: groceries
     label: 食品生鲜
-    kind: expense
   - id: household
     label: 日用百货
-    kind: expense
   - id: dining
     label: 餐饮外卖
-    kind: expense
   - id: transport
     label: 交通出行
-    kind: expense
   - id: rent
     label: 房租
-    kind: expense
   - id: utilities
     label: 水电煤网
-    kind: expense
   - id: health
     label: 医疗健康
-    kind: expense
   - id: education
     label: 教育学习
-    kind: expense
   - id: subscriptions
     label: 订阅会员
-    kind: expense
   - id: salary
     label: 工资收入
-    kind: income
   - id: interest
     label: 利息收入
-    kind: income
+  - id: family_support
+    label: 家庭资助
   - id: transfer
     label: 转账不计收支
-    kind: transfer
   - id: review
     label: 待人工判断
-    kind: review
   - id: other
     label: 其他
-    kind: expense

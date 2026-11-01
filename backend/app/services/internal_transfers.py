@@ -8,7 +8,6 @@ from typing import Any, Literal
 from app.extensions import db
 from app.models import Bill, InternalTransferLink
 from app.services.aa_rules import AaRuleError, require_household
-from app.services.analytics import INCOME_IDS
 from app.services.classify import STATUS_CONFIRMED
 
 STATUS_LINKED = "linked"
@@ -66,12 +65,7 @@ def bill_direction(bill: Bill) -> Direction:
     if total < 0:
         return "out"
 
-    # Fallback: entry categories
-    cats = {e.category_id for e in (bill.entries or []) if e.category_id}
-    if cats & INCOME_IDS and not (cats - INCOME_IDS - {_TRANSFER_CATEGORY}):
-        return "in"
-    if cats and not (cats & INCOME_IDS):
-        return "out"
+    # No transaction type and zero net: direction cannot be inferred reliably.
     return "unknown"
 
 

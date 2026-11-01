@@ -139,6 +139,12 @@ export function CategoryIcon({ id, className }: Props) {
           <circle cx="12" cy="12" r="3" />
         </Svg>
       );
+    case "family_support":
+      return (
+        <Svg className={className}>
+          <path d="M19 14c1.5-1.5 3-3.3 3-5.5A4.5 4.5 0 0 0 12 6 4.5 4.5 0 0 0 2 8.5c0 2.2 1.5 4 3 5.5l7 7Z" />
+        </Svg>
+      );
     case "transfer":
       return (
         <Svg className={className}>

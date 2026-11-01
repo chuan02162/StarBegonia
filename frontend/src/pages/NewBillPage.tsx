@@ -7,6 +7,7 @@ import type { CategoryItem } from "../types";
 type DraftEntry = {
   name: string;
   amount: string;
+  direction: "out" | "in";
   category_id: string;
 };
 
@@ -20,7 +21,7 @@ export function NewBillPage() {
   const [currency, setCurrency] = useState("AUD");
   const [note, setNote] = useState("");
   const [entries, setEntries] = useState<DraftEntry[]>([
-    { name: "", amount: "", category_id: "" },
+    { name: "", amount: "", direction: "out", category_id: "" },
   ]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [error, setError] = useState("");
@@ -51,7 +52,10 @@ export function NewBillPage() {
           note: note || null,
           entries: entries.map((en) => ({
             name: en.name,
-            amount: en.amount,
+            amount: (() => {
+              const abs = en.amount.trim().replace(/^-/, "");
+              return en.direction === "in" ? abs : `-${abs}`;
+            })(),
             category_id: en.category_id || null,
           })),
         }),
@@ -105,14 +109,17 @@ export function NewBillPage() {
               type="button"
               className="text-sm text-ink-700"
               onClick={() =>
-                setEntries((prev) => [...prev, { name: "", amount: "", category_id: "" }])
+                setEntries((prev) => [
+                  ...prev,
+                  { name: "", amount: "", direction: "out", category_id: "" },
+                ])
               }
             >
               + 添加行
             </button>
           </div>
           {entries.map((en, i) => (
-            <div key={i} className="grid gap-2 sm:grid-cols-[1fr_7rem_9rem_auto]">
+            <div key={i} className="grid gap-2 sm:grid-cols-[1fr_5.5rem_7rem_9rem_auto]">
               <input
                 className="field"
                 placeholder="名称"
@@ -120,6 +127,18 @@ export function NewBillPage() {
                 onChange={(e) => updateEntry(i, { name: e.target.value })}
                 required
               />
+              <select
+                className="field"
+                value={en.direction}
+                onChange={(e) =>
+                  updateEntry(i, {
+                    direction: e.target.value === "in" ? "in" : "out",
+                  })
+                }
+              >
+                <option value="out">支出</option>
+                <option value="in">收入</option>
+              </select>
               <input
                 className="field"
                 placeholder="金额"
