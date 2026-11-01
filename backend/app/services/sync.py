@@ -589,9 +589,6 @@ def _refresh_existing_bill(
         if draft.note != bill.note:
             bill.note = draft.note
             changed = True
-        if draft.net_amount is not None and Decimal(str(draft.net_amount)) != bill.net_amount:
-            bill.net_amount = draft.net_amount
-            changed = True
         need_classify = _replace_bill_entries(bill, draft)
         changed = True
         return changed, need_classify
@@ -850,7 +847,6 @@ def _insert_bill(
         currency=draft.currency or "AUD",
         external_id=draft.external_id,
         note=draft.note,
-        net_amount=draft.net_amount,
         dedup_status="unmatched",
     )
     db.session.add(bill)

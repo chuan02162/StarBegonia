@@ -53,8 +53,6 @@ class Bill(db.Model):
 
     @property
     def total_amount(self) -> Decimal:
-        if self.net_amount is not None:
-            return Decimal(self.net_amount)
         return sum((e.amount for e in self.entries), Decimal("0"))
 
     def to_dict(self, *, include_entries: bool = True) -> dict:
@@ -98,6 +96,9 @@ class Entry(db.Model):
         db.String(32), nullable=False, default="unclassified", index=True
     )
     category_confidence = db.Column(db.Numeric(6, 4), nullable=True)
+    # Set when a person manually picks/confirms a category; never overwritten
+    # by automatic classification (rules or Jev).
+    manual_override = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     bill = db.relationship("Bill", back_populates="entries")
@@ -122,4 +123,5 @@ class Entry(db.Model):
                 if self.category_confidence is not None
                 else None
             ),
+            "manual_override": self.manual_override,
         }

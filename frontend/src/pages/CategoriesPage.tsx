@@ -202,7 +202,7 @@ function PendingRow({
   const conf = entry.category_confidence
     ? `${(Number(entry.category_confidence) * 100).toFixed(0)}%`
     : "—";
-  const canConfirm = Boolean(entry.category_id);
+  const canConfirm = Boolean(entry.category_id) && entry.category_id !== "review";
 
   return (
     <li className="py-6">

@@ -8,6 +8,7 @@ import { BillDetailPage } from "./pages/BillDetailPage";
 import { BillsPage } from "./pages/BillsPage";
 import { BootstrapPage } from "./pages/BootstrapPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
+import { ClassificationRulesPage } from "./pages/ClassificationRulesPage";
 import { DedupPage } from "./pages/DedupPage";
 import { InternalTransfersPage } from "./pages/InternalTransfersPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="transfers" element={<InternalTransfersPage />} />
         <Route path="account" element={<AccountPage />} />
         <Route path="account/sources/:sourceType" element={<SourceCredentialPage />} />
+        <Route path="account/rules" element={<ClassificationRulesPage />} />
         <Route path="people" element={<Navigate to="/account" replace />} />
         <Route path="invites" element={<Navigate to="/account" replace />} />
       </Route>

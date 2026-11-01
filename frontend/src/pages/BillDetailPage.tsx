@@ -177,7 +177,9 @@ function EntryRow({
   const pending = entry.classification_status === "pending";
 
   const income = isIncomeAmount(entry.amount);
-  const lineAmount = Number(entry.amount);
+  // DB stores signed amounts (negative = money out). For grocery receipts,
+  // negate for display so line items read positive and discounts negative.
+  const lineAmount = receiptSigned ? -Number(entry.amount) : Number(entry.amount);
   const isDiscount = receiptSigned && lineAmount < 0;
   const thumbSrc = isFlybuysEntry(entry.name)
     ? "/flybuys.png"
@@ -188,7 +190,7 @@ function EntryRow({
       : "text-ink-800"
     : moneyClass(income);
   const amountText = receiptSigned
-    ? formatMoney(entry.amount, currency)
+    ? formatMoney(lineAmount, currency)
     : formatMoneySigned(entry.amount, currency, { income });
 
   return (

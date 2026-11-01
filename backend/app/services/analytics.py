@@ -17,7 +17,7 @@ Granularity = Literal["week", "month", "quarter", "year"]
 # Legacy helpers — polarity is amount sign (positive = in, negative = out).
 # Kept for internal-transfer heuristics / settlements filters.
 INCOME_IDS = {"salary", "interest", "income", "income_other"}
-EXCLUDE_IDS = {"transfer"}
+EXCLUDE_IDS = {"transfer", "review"}
 
 
 def _period_bounds(granularity: Granularity, *, now: datetime | None = None) -> tuple[datetime, datetime]:
@@ -99,27 +99,28 @@ def overview(
                     Entry.currency == currency,
                 )
             )
+            .order_by(Bill.id, Entry.id)
             .all()
         )
 
     cat_labels: dict[str, str] = {}
+    cat_kind: dict[str, str] = {}
     try:
         vocab = get_vocabulary()
-        cat_labels = {
-            c["id"]: c.get("label") or c["id"]
-            for c in (vocab.get("categories") or [])
-            if c.get("id")
-        }
+        for c in (vocab.get("categories") or []):
+            if not c.get("id"):
+                continue
+            cat_labels[c["id"]] = c.get("label") or c["id"]
+            cat_kind[c["id"]] = c.get("kind") or "expense"
     except FileNotFoundError:
         pass
 
-    expense_by_bucket: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
-    income_by_bucket: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
-    by_category: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-    by_source: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-    current_expense = Decimal("0")
-    current_income = Decimal("0")
-
+    category_by_bucket: dict[int, dict[str, Decimal]] = defaultdict(
+        lambda: defaultdict(lambda: Decimal("0"))
+    )
+    source_by_bucket: dict[int, dict[str, Decimal]] = defaultdict(
+        lambda: defaultdict(lambda: Decimal("0"))
+    )
     def bucket_index(occurred: datetime) -> int | None:
         for i, s in enumerate(starts):
             nxt = starts[i + 1] if i + 1 < len(starts) else current_end
@@ -127,52 +128,75 @@ def overview(
                 return i
         return None
 
-    receipt_signed_sources = {"coles", "wws"}
     seen_bills: set[int] = set()
     for entry, bill in rows:
         bi = bucket_index(bill.occurred_at)
         if bi is None:
             continue
-        net = Decimal(
-            bill.net_amount if bill.net_amount is not None else (bill.total_amount or 0)
-        )
-        in_current = current_start <= bill.occurred_at < current_end
 
-        # Bill-level income/expense from the signed net amount (once per bill).
+        # Category net flow (signed: money out negative, money in positive).
+        cat = entry.category_id or "other"
+        if cat not in EXCLUDE_IDS:
+            flow = Decimal(entry.amount or 0)
+            if flow != 0:
+                category_by_bucket[bi][cat] += flow
+
+        # Bill-level source split (signed net per bill, once per bill).
         if bill.id not in seen_bills:
             seen_bills.add(bill.id)
+            net = Decimal(bill.total_amount or 0)
             if net < 0:
-                exp = abs(net)
-                expense_by_bucket[bi] += exp
-                if in_current:
-                    current_expense += exp
-                    by_source[bill.source_type or "unknown"] += exp
-            elif net > 0:
-                income_by_bucket[bi] += net
-                if in_current:
-                    current_income += net
+                source_by_bucket[bi][bill.source_type or "unknown"] += abs(net)
 
-        # Category pie attributes spend line items (positive for receipt-signed
-        # grocery sources, negative for bank-style signed sources).
-        if net < 0:
-            line_amount = Decimal(entry.amount or 0)
-            if line_amount == 0:
+    def _totals(bucket: dict[str, Decimal]) -> tuple[Decimal, Decimal]:
+        expense = sum(
+            (max(Decimal("0"), -net) for net in bucket.values()), Decimal("0")
+        )
+        income = sum(
+            (max(Decimal("0"), net) for net in bucket.values()), Decimal("0")
+        )
+        return expense, income
+
+    def _category_list(bucket: dict[str, Decimal]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for cid, net in bucket.items():
+            if cat_kind.get(cid, "expense") != "expense":
                 continue
-            is_spend = (
-                line_amount > 0
-                if bill.source_type in receipt_signed_sources
-                else line_amount < 0
+            amount = max(Decimal("0"), -net)
+            if amount <= 0:
+                continue
+            items.append(
+                {
+                    "id": cid,
+                    "label": cat_labels.get(cid, cid),
+                    "amount": str(amount),
+                }
             )
-            if not is_spend:
-                continue
-            cat = entry.category_id or "other"
-            if cat not in EXCLUDE_IDS:
-                by_category[cat] += abs(line_amount)
+        total = sum((Decimal(i["amount"]) for i in items), Decimal("0")) or Decimal("1")
+        for item in items:
+            item["share"] = float(Decimal(item["amount"]) / total)
+        items.sort(key=lambda x: Decimal(x["amount"]), reverse=True)
+        return items
 
+    def _source_list(bucket: dict[str, Decimal]) -> list[dict[str, Any]]:
+        total = sum(bucket.values(), Decimal("0")) or Decimal("1")
+        return sorted(
+            (
+                {
+                    "id": sid,
+                    "amount": str(amt),
+                    "share": float(amt / total),
+                }
+                for sid, amt in bucket.items()
+            ),
+            key=lambda x: Decimal(x["amount"]),
+            reverse=True,
+        )
+
+    current_index = len(starts) - 1
     series = []
     for i, s in enumerate(starts):
-        exp = expense_by_bucket[i]
-        inc = income_by_bucket[i]
+        exp, inc = _totals(category_by_bucket[i])
         series.append(
             {
                 "start": s.isoformat() + "Z",
@@ -180,37 +204,14 @@ def overview(
                 "expense": str(exp),
                 "income": str(inc),
                 "balance": str(inc - exp),
+                "by_category": _category_list(category_by_bucket[i]),
+                "by_source": _source_list(source_by_bucket[i]),
             }
         )
 
-    cat_total = sum(by_category.values(), Decimal("0")) or Decimal("1")
-    categories = sorted(
-        (
-            {
-                "id": cid,
-                "label": cat_labels.get(cid, cid),
-                "amount": str(amt),
-                "share": float(amt / cat_total),
-            }
-            for cid, amt in by_category.items()
-        ),
-        key=lambda x: Decimal(x["amount"]),
-        reverse=True,
-    )
-
-    src_total = sum(by_source.values(), Decimal("0")) or Decimal("1")
-    sources = sorted(
-        (
-            {
-                "id": sid,
-                "amount": str(amt),
-                "share": float(amt / src_total),
-            }
-            for sid, amt in by_source.items()
-        ),
-        key=lambda x: Decimal(x["amount"]),
-        reverse=True,
-    )
+    categories = _category_list(category_by_bucket[current_index])
+    sources = _source_list(source_by_bucket[current_index])
+    current_expense, current_income = _totals(category_by_bucket[current_index])
 
     return {
         "granularity": granularity,

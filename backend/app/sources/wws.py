@@ -365,9 +365,11 @@ def _parse_receipt(receipt: dict[str, Any]) -> BillDraft | None:
         if not name or magnitude is None or magnitude == 0:
             continue
         prefix = str(item.get("prefixChar") or "").strip()
-        # Receipt sign: normal lines positive (money out), "-" lines are
-        # discounts / refunds (negative), exactly as printed on the receipt.
-        amount = -abs(magnitude) if prefix in {"-", "−", "–"} else abs(magnitude)
+        # Normalise to the receipt number (items positive, discounts negative),
+        # then flip to signed storage: spend negative, refund/discount positive.
+        if prefix in {"-", "−", "–"}:
+            magnitude = -abs(magnitude)
+        amount = -magnitude
         entries.append(
             EntryDraft(
                 name=name[:255],
@@ -382,7 +384,7 @@ def _parse_receipt(receipt: dict[str, Any]) -> BillDraft | None:
         entries.append(
             EntryDraft(
                 name="Woolworths purchase",
-                amount=abs(total),
+                amount=-abs(total),
                 currency="AUD",
                 tags=["Woolworths"],
                 note="eReceipt line amounts were unavailable.",
@@ -401,7 +403,6 @@ def _parse_receipt(receipt: dict[str, Any]) -> BillDraft | None:
         merchant="Woolworths",
         currency="AUD",
         external_id=external_id,
-        net_amount=-abs(total),
         note=f"Everyday Rewards eReceipt{f' · store {store_no}' if store_no else ''}",
         entries=entries,
     )

@@ -6,6 +6,7 @@ import { JobProgressBar } from "../components/JobProgressBar";
 import { SOURCE_LABELS, SourceLogo } from "../components/SourceLogo";
 import { pollJob, type JobProgress } from "../lib/jobs";
 import { useRefreshSourceStatus, useSourceStatus } from "../lib/sourceStatus";
+import { ClassificationRules } from "./ClassificationRulesPage";
 import type { Household, Invite, Person } from "../types";
 
 type SourceInfo = {
@@ -35,11 +36,13 @@ export function AccountPage() {
   const [jevMsg, setJevMsg] = useState("");
   const [jevContext, setJevContext] = useState("");
   const [jevContextMsg, setJevContextMsg] = useState("");
-  const [showJevContext, setShowJevContext] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [syncProgress, setSyncProgress] = useState<JobProgress | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [jevProgress, setJevProgress] = useState<JobProgress | null>(null);
+  const [tab, setTab] = useState<
+    "personal" | "categories" | "sources" | "family"
+  >("personal");
 
   const sourceStatus = useSourceStatus();
   const {
@@ -134,8 +137,7 @@ export function AccountPage() {
     }
   }
 
-  async function saveJevContext(e: FormEvent) {
-    e.preventDefault();
+  async function saveJevContext() {
     setBusy(true);
     setError("");
     setJevContextMsg("");
@@ -395,6 +397,31 @@ export function AccountPage() {
 
       {error && <p className="text-sm text-red-700">{error}</p>}
 
+      <div className="flex flex-wrap gap-1 border-b border-ink-100 pb-3">
+        {(
+          [
+            ["personal", "个人信息"],
+            ["categories", "分类"],
+            ["sources", "数据源"],
+            ["family", "家庭"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={`rounded-md px-3 py-1.5 text-sm transition ${
+              tab === id
+                ? "bg-ink-700 text-white"
+                : "text-ink-600 hover:bg-ink-50"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "personal" && (
       <section className="max-w-md space-y-4">
         <h2 className="font-display text-xl text-ink-800">个人资料</h2>
         <form onSubmit={saveName} className="space-y-4">
@@ -413,7 +440,62 @@ export function AccountPage() {
           </button>
         </form>
       </section>
+      )}
 
+      {tab === "categories" && (
+        <section className="space-y-8">
+          <div className="space-y-3">
+            <h2 className="font-display text-xl text-ink-800">分类提示词</h2>
+            <p className="text-sm text-ink-500">
+              会附加到每次自动分类请求里。例如：我在 Neo Networks 工作，工资常显示为
+              PAY FOR…；Origin 是电费不是房租。
+            </p>
+            <textarea
+              className="field min-h-[7rem]"
+              value={jevContext}
+              onChange={(e) => setJevContext(e.target.value)}
+              maxLength={4000}
+              placeholder="我在 xx 公司工作…"
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                className="btn-primary text-sm"
+                onClick={saveJevContext}
+                disabled={busy}
+              >
+                保存提示词
+              </button>
+              {jevContextMsg && (
+                <p className="text-sm text-ink-500">{jevContextMsg}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="font-display text-xl text-ink-800">自动分类</h2>
+            <p className="text-sm text-ink-500">
+              对所有记录先跑分类规则，命中的直接定死；其余再交给 Jev 重新分类。
+            </p>
+            <button
+              type="button"
+              className="btn-primary text-sm"
+              onClick={runFullJev}
+              disabled={busy}
+            >
+              全量分类
+            </button>
+            {jevMsg && <p className="text-sm text-ink-500">{jevMsg}</p>}
+            {(busy || jevProgress) && (
+              <JobProgressBar progress={jevProgress} active={busy} />
+            )}
+          </div>
+
+          <ClassificationRules />
+        </section>
+      )}
+
+      {tab === "family" && (
       <section className="space-y-5">
         <div>
           <h2 className="font-display text-xl text-ink-800">家庭</h2>
@@ -477,60 +559,12 @@ export function AccountPage() {
                   type="button"
                   className="btn-ghost text-sm"
                   disabled={busy}
-                  onClick={() => setShowJevContext((v) => !v)}
-                >
-                  编辑 Jev 提示词
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost text-sm"
-                  disabled={busy}
-                  onClick={runFullJev}
-                >
-                  全量跑 Jev
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost text-sm"
-                  disabled={busy}
                   onClick={leaveHousehold}
                 >
                   退出家庭
                 </button>
               </div>
             </div>
-            {jevMsg && <p className="text-sm text-ink-500">{jevMsg}</p>}
-            {(busy || jevProgress) && (
-              <JobProgressBar progress={jevProgress} active={busy} />
-            )}
-
-            {showJevContext && (
-              <form
-                onSubmit={saveJevContext}
-                className="space-y-3 rounded-lg bg-ink-50/80 p-4 ring-1 ring-ink-100"
-              >
-                <p className="text-sm font-medium text-ink-700">发给 Jev 的家庭背景</p>
-                <p className="text-sm text-ink-500">
-                  例如：我在 Neo Networks 工作，工资常显示为 PAY FOR…；Origin
-                  是电费不是房租。会附加到每次自动分类请求里。
-                </p>
-                <textarea
-                  className="field min-h-[7rem]"
-                  value={jevContext}
-                  onChange={(e) => setJevContext(e.target.value)}
-                  maxLength={4000}
-                  placeholder="我在 xx 公司工作…"
-                />
-                <div className="flex flex-wrap items-center gap-3">
-                  <button type="submit" className="btn-primary text-sm" disabled={busy}>
-                    保存提示词
-                  </button>
-                  {jevContextMsg && (
-                    <p className="text-sm text-ink-500">{jevContextMsg}</p>
-                  )}
-                </div>
-              </form>
-            )}
 
             <ul className="divide-y divide-ink-100">
               {(household.members || []).map((m) => (
@@ -670,37 +704,41 @@ export function AccountPage() {
           </div>
         )}
       </section>
+      )}
 
+      {tab === "sources" && (
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-display text-xl text-ink-800">数据源</h2>
             <p className="text-sm text-ink-500">连接超市 / 银行等平台，用于同步账单</p>
           </div>
-          <button
-            type="button"
-            className="btn-ghost px-2 py-2"
-            onClick={() =>
-              refreshStatus().catch(() => setError("刷新连接状态失败"))
-            }
-            disabled={refreshingStatus}
-            aria-label="刷新连接状态"
-            title="刷新连接状态"
-          >
-            <svg
-              className={`h-5 w-5 ${refreshingStatus ? "animate-spin" : ""}`}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-ghost px-2 py-2"
+              onClick={() =>
+                refreshStatus().catch(() => setError("刷新连接状态失败"))
+              }
+              disabled={refreshingStatus}
+              aria-label="刷新连接状态"
+              title="刷新连接状态"
             >
-              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-              <path d="M21 3v6h-6" />
-            </svg>
-          </button>
+              <svg
+                className={`h-5 w-5 ${refreshingStatus ? "animate-spin" : ""}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <path d="M21 3v6h-6" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <button
@@ -758,6 +796,7 @@ export function AccountPage() {
           ))}
         </ul>
       </section>
+      )}
     </div>
   );
 }

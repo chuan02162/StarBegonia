@@ -15,6 +15,29 @@ import type { Bill } from "../types";
 
 type Granularity = "week" | "month" | "quarter" | "year";
 
+type CategorySlice = {
+  id: string;
+  label: string;
+  amount: string;
+  share: number;
+};
+
+type SourceSlice = {
+  id: string;
+  amount: string;
+  share: number;
+};
+
+type SeriesItem = {
+  start: string;
+  label: string;
+  expense: string;
+  income: string;
+  balance: string;
+  by_category: CategorySlice[];
+  by_source: SourceSlice[];
+};
+
 type OverviewData = {
   granularity: Granularity;
   currency: string;
@@ -25,20 +48,9 @@ type OverviewData = {
     income: string;
     balance: string;
   };
-  series: {
-    start: string;
-    label: string;
-    expense: string;
-    income: string;
-    balance: string;
-  }[];
-  by_category: {
-    id: string;
-    label: string;
-    amount: string;
-    share: number;
-  }[];
-  by_source: { id: string; amount: string; share: number }[];
+  series: SeriesItem[];
+  by_category: CategorySlice[];
+  by_source: SourceSlice[];
 };
 
 const PERIODS: { id: Granularity; label: string }[] = [
@@ -52,6 +64,7 @@ export function OverviewPage() {
   const { user } = useAuth();
   const [granularity, setGranularity] = useState<Granularity>("month");
   const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [hoveredPeriod, setHoveredPeriod] = useState<number | null>(null);
   const [bills, setBills] = useState<Bill[]>([]);
   const [error, setError] = useState("");
 
@@ -69,8 +82,17 @@ export function OverviewPage() {
   }, []);
 
   const currency = overview?.currency || "AUD";
-  const expense = Number(overview?.period.expense || 0);
-  const income = Number(overview?.period.income || 0);
+  const hovered =
+    hoveredPeriod !== null ? overview?.series[hoveredPeriod] : undefined;
+  const expense = Number(
+    hovered?.expense ?? overview?.period.expense ?? 0,
+  );
+  const income = Number(
+    hovered?.income ?? overview?.period.income ?? 0,
+  );
+  const byCategory = hovered?.by_category ?? overview?.by_category ?? [];
+  const bySource = hovered?.by_source ?? overview?.by_source ?? [];
+  const activePeriodLabel = hovered?.label;
 
   return (
     <div className="space-y-14">
@@ -103,7 +125,9 @@ export function OverviewPage() {
 
         <div className="grid gap-8 sm:grid-cols-[1.2fr_auto] sm:items-end">
           <div>
-            <p className="text-sm text-ink-400">支出</p>
+            <p className="text-sm text-ink-400">
+              支出{activePeriodLabel ? ` · ${activePeriodLabel}` : ""}
+            </p>
             <p className="mt-1 font-display text-5xl tracking-tight text-ink-700 tabular-nums animate-[fadeIn_0.35s_ease]">
               {formatMoney(expense, currency)}
             </p>
@@ -136,7 +160,11 @@ export function OverviewPage() {
           <p className="mt-1 text-sm text-ink-400">近几个{periodUnit(granularity)}</p>
           <div className="mt-6">
             {overview ? (
-              <TrendChart series={overview.series} currency={currency} />
+              <TrendChart
+                series={overview.series}
+                currency={currency}
+                onHover={setHoveredPeriod}
+              />
             ) : (
               <div className="h-40 animate-pulse rounded-md bg-ink-50" />
             )}
@@ -145,10 +173,12 @@ export function OverviewPage() {
 
         <div>
           <h2 className="font-display text-xl text-ink-800">分类构成</h2>
-          <p className="mt-1 text-sm text-ink-400">当前周期</p>
+          <p className="mt-1 text-sm text-ink-400">
+            {activePeriodLabel || "当前周期"}
+          </p>
           <div className="mt-6">
             {overview ? (
-              <CategoryBars items={overview.by_category} currency={currency} />
+              <CategoryBars items={byCategory} currency={currency} />
             ) : (
               <div className="h-40 animate-pulse rounded-md bg-ink-50" />
             )}
@@ -156,11 +186,14 @@ export function OverviewPage() {
         </div>
       </section>
 
-      {overview && overview.by_source.length > 0 && (
+      {overview && bySource.length > 0 && (
         <section>
           <h2 className="font-display text-xl text-ink-800">按来源</h2>
+          <p className="mt-1 text-sm text-ink-400">
+            {activePeriodLabel || "当前周期"}
+          </p>
           <ul className="mt-4 flex flex-wrap gap-6">
-            {overview.by_source.map((s) => (
+            {bySource.map((s) => (
               <li key={s.id} className="flex items-center gap-3">
                 <SourceLogo source={s.id} className="h-8 w-8" />
                 <div>
@@ -227,9 +260,11 @@ function periodUnit(g: Granularity): string {
 function TrendChart({
   series,
   currency,
+  onHover,
 }: {
   series: OverviewData["series"];
   currency: string;
+  onHover?: (index: number | null) => void;
 }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const values = series.map((s) => Number(s.expense));
@@ -248,23 +283,7 @@ function TrendChart({
   }
 
   return (
-    <div className="relative">
-      {hoveredIndex !== null && series[hoveredIndex] && (
-        <div className="pointer-events-none absolute right-2 top-2 z-10 rounded-md bg-white/95 px-3 py-2 text-xs shadow-md ring-1 ring-ink-200">
-          <p className="mb-1 font-medium text-ink-800">
-            {series[hoveredIndex].label} · 区间详情
-          </p>
-          <p className="text-ink-600">
-            支出 {formatMoney(series[hoveredIndex].expense, currency)}
-          </p>
-          <p className="text-ink-600">
-            收入 {formatMoney(series[hoveredIndex].income, currency)}
-          </p>
-          <p className="text-ink-600">
-            净额 {formatMoney(series[hoveredIndex].balance, currency)}
-          </p>
-        </div>
-      )}
+    <div>
       <svg
         viewBox={`0 0 ${w} ${h}`}
         className="h-auto w-full max-w-lg"
@@ -284,10 +303,22 @@ function TrendChart({
               tabIndex={0}
               role="button"
               aria-label={`${s.label}，支出 ${formatMoney(s.expense, currency)}，收入 ${formatMoney(s.income, currency)}，净额 ${formatMoney(s.balance, currency)}`}
-              onMouseEnter={() => setHoveredIndex(i)}
-              onMouseLeave={() => setHoveredIndex(null)}
-              onFocus={() => setHoveredIndex(i)}
-              onBlur={() => setHoveredIndex(null)}
+              onMouseEnter={() => {
+                setHoveredIndex(i);
+                onHover?.(i);
+              }}
+              onMouseLeave={() => {
+                setHoveredIndex(null);
+                onHover?.(null);
+              }}
+              onFocus={() => {
+                setHoveredIndex(i);
+                onHover?.(i);
+              }}
+              onBlur={() => {
+                setHoveredIndex(null);
+                onHover?.(null);
+              }}
             >
               <rect
                 x={x}

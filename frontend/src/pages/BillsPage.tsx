@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { SOURCE_LABELS, SourceLogo } from "../components/SourceLogo";
 import {
@@ -13,20 +13,34 @@ import type { Bill, CategoryItem, Vocabulary } from "../types";
 const PAGE_SIZE = 40;
 
 export function BillsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [bills, setBills] = useState<Bill[]>([]);
-  const [source, setSource] = useState("");
-  const [categoryId, setCategoryId] = useState("");
+  const [source, setSource] = useState(searchParams.get("source_type") || "");
+  const [categoryId, setCategoryId] = useState(
+    searchParams.get("category_id") || "",
+  );
   const [categories, setCategories] = useState<CategoryItem[]>([]);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || "");
+  const [dateTo, setDateTo] = useState(searchParams.get("date_to") || "");
+  const [searchInput, setSearchInput] = useState(searchParams.get("q") || "");
+  const [search, setSearch] = useState(searchParams.get("q") || "");
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestId = useRef(0);
+
+  // Keep filters in the URL so returning from a bill detail restores them.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (source) params.set("source_type", source);
+    if (categoryId) params.set("category_id", categoryId);
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
+    if (search) params.set("q", search);
+    setSearchParams(params, { replace: true });
+  }, [source, categoryId, dateFrom, dateTo, search, setSearchParams]);
 
   useEffect(() => {
     api<Vocabulary>("/api/v1/categories").then((v) =>

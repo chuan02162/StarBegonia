@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from typing import Any
 
 from flask import current_app
@@ -9,6 +10,11 @@ from sqlalchemy.orm import joinedload
 from app.extensions import db
 from app.models import Bill, Entry
 from app.services.categories import get_vocabulary
+from app.services.classification_rules import (
+    apply_rule_matches,
+    best_match,
+    rules_for_household,
+)
 from app.services.jev import JevError, classify_entry_state
 from app.services.titles import best_title
 
@@ -24,15 +30,43 @@ STATUS_UNCLASSIFIED = "unclassified"
 STATUS_PENDING = "pending"
 STATUS_CONFIRMED = "confirmed"
 
+# Jev can return this category id to mean "I'm not sure — ask the user".
+REVIEW_CATEGORY = "review"
+
 _MAX_BATCH = 5000
 _JEV_BATCH_SIZE = 50
 _MAX_JEV_CONCURRENCY = 8
+
+
+def _apply_jev_result(
+    entry: Entry,
+    *,
+    category_id: str | None,
+    confidence: float | None,
+    threshold: float,
+) -> None:
+    entry.category_confidence = confidence
+    entry.tags = []
+    if category_id == REVIEW_CATEGORY:
+        entry.category_id = REVIEW_CATEGORY
+        entry.classification_status = STATUS_PENDING
+    elif category_id and confidence is not None and confidence >= threshold:
+        entry.category_id = category_id
+        entry.classification_status = STATUS_CONFIRMED
+    elif category_id:
+        entry.category_id = category_id
+        entry.classification_status = STATUS_PENDING
+    else:
+        entry.category_id = None
+        entry.classification_status = STATUS_UNCLASSIFIED
 
 
 def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
     entry = db.session.get(Entry, entry_id)
     if not entry:
         raise ClassifyError("entry not found", 404)
+    if entry.manual_override:
+        return entry
     if (
         not force
         and entry.classification_status == STATUS_CONFIRMED
@@ -43,6 +77,17 @@ def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
     vocab = get_vocabulary()
     categories = vocab.get("categories") or []
     bill = entry.bill
+
+    # User-defined rules win (deterministic, cheapest first).
+    if bill and bill.household_id:
+        rule = best_match(entry, rules_for_household(bill.household_id))
+        if rule:
+            entry.category_id = rule.category_id
+            entry.category_confidence = Decimal("1.0")
+            entry.classification_status = STATUS_CONFIRMED
+            entry.tags = []
+            db.session.commit()
+            return entry
 
     # The retired bank provider sometimes stored description="general" as entry.name; merchant
     # holds the real title — send that to Jev or confidence stays junk.
@@ -73,18 +118,12 @@ def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
     category_id = result.get("category_id")
     confidence = result.get("confidence")
     threshold = float(current_app.config.get("JEV_CONFIDENCE_THRESHOLD", 0.7))
-
-    if category_id:
-        entry.category_id = category_id
-    entry.category_confidence = confidence
-    entry.tags = []
-
-    if confidence is not None and confidence >= threshold and category_id:
-        entry.classification_status = STATUS_CONFIRMED
-    elif category_id:
-        entry.classification_status = STATUS_PENDING
-    else:
-        entry.classification_status = STATUS_UNCLASSIFIED
+    _apply_jev_result(
+        entry,
+        category_id=category_id,
+        confidence=confidence,
+        threshold=threshold,
+    )
 
     db.session.commit()
     return entry
@@ -124,7 +163,7 @@ def classify_entries(
     limit: int = 50,
     viewer_person_id: int | None = None,
 ) -> dict[str, Any]:
-    q = Entry.query
+    q = Entry.query.filter(Entry.manual_override == False)  # noqa: E712
     if entry_ids is not None:
         q = q.filter(Entry.id.in_(entry_ids))
     elif viewer_person_id is not None:
@@ -157,6 +196,15 @@ def classify_entries(
     failed: list[dict[str, Any]] = []
     total = len(entries)
 
+    # User-defined rules win (deterministic, cheapest first).
+    rules_cache: dict[int, list[Any]] = {}
+    matched_ids = apply_rule_matches(entries, rules_cache=rules_cache)
+    if matched_ids:
+        db.session.commit()
+        classified += len(matched_ids)
+    matched_set = set(matched_ids)
+    entries = [e for e in entries if e.id not in matched_set]
+
     try:
         from app.jobs.progress import set_progress
     except Exception:
@@ -176,7 +224,7 @@ def classify_entries(
         threshold = float(current_app.config.get("JEV_CONFIDENCE_THRESHOLD", 0.7))
         configured_concurrency = int(current_app.config.get("JEV_CONCURRENCY", 8))
         concurrency = min(max(configured_concurrency, 1), _MAX_JEV_CONCURRENCY)
-        classified, pending, failed = asyncio.run(
+        jev_classified, pending, failed = asyncio.run(
             _classify_entries_concurrently(
                 app,
                 entries,
@@ -186,6 +234,7 @@ def classify_entries(
                 progress_callback=set_progress,
             )
         )
+        classified += jev_classified
 
     if set_progress:
         set_progress(
@@ -196,7 +245,7 @@ def classify_entries(
         )
 
     return {
-        "requested": len(entries),
+        "requested": total,
         "classified": classified,
         "pending_after": pending,
         "failed": failed,
@@ -283,16 +332,12 @@ async def _classify_entries_concurrently(
                 entry.name = snapshot["name"][:255]
             category_id = outcome.get("category_id")
             confidence = outcome.get("confidence")
-            if category_id:
-                entry.category_id = category_id
-            entry.category_confidence = confidence
-            entry.tags = []
-            if confidence is not None and confidence >= threshold and category_id:
-                entry.classification_status = STATUS_CONFIRMED
-            elif category_id:
-                entry.classification_status = STATUS_PENDING
-            else:
-                entry.classification_status = STATUS_UNCLASSIFIED
+            _apply_jev_result(
+                entry,
+                category_id=category_id,
+                confidence=confidence,
+                threshold=threshold,
+            )
             classified += 1
             if entry.classification_status == STATUS_PENDING:
                 pending += 1
@@ -392,15 +437,20 @@ def update_entry_classification(
             entry.category_id = None
             entry.classification_status = STATUS_UNCLASSIFIED
             entry.category_confidence = None
+            entry.manual_override = False
             db.session.commit()
             return entry
         if category_id not in valid_cats:
             raise ClassifyError(f"unknown category_id: {category_id}")
         entry.category_id = category_id
+        entry.manual_override = True
         changed = True
 
     if confirm or changed:
-        if entry.category_id:
+        if entry.category_id == REVIEW_CATEGORY:
+            if confirm:
+                raise ClassifyError("待人工判断不是最终分类，请选择一个具体分类")
+        elif entry.category_id:
             entry.classification_status = STATUS_CONFIRMED
         elif confirm:
             raise ClassifyError("cannot confirm without category_id")
