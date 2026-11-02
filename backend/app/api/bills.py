@@ -3,6 +3,7 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request
 
 from app.api.deps import current_person, login_required
+from app.services import abr as abr_service
 from app.services import bills as bills_service
 from app.services import dedup as dedup_service
 
@@ -46,6 +47,13 @@ def list_bills():
     payload = []
     for b in bills:
         data = b.to_dict()
+        merchant = data.get("merchant")
+        if b.source_type == "commbank" and merchant and b.household_id:
+            data["display_name"] = (
+                abr_service.enrich_merchant(merchant, b.household_id) or merchant
+            )
+        else:
+            data["display_name"] = merchant
         peer = peer_map.get(b.id)
         account, account_person_id = dedup_service.display_account(b, peer)
         data["account"] = account

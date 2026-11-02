@@ -47,12 +47,12 @@ def test_jev_snapshot_requests_use_bounded_concurrency(monkeypatch):
     snapshots = [
         {
             "name": f"entry {i}",
+            "persist_name": f"entry {i}",
             "amount": "1.00",
-            "merchant": "example",
             "source_type": "commbank",
-            "note": None,
             "categories": [],
             "household_context": None,
+            "api_key": None,
         }
         for i in range(8)
     ]

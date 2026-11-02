@@ -10,6 +10,7 @@ from app.api import (
     entries,
     households,
     people,
+    secrets,
     settlements,
     sources,
     transfers,
@@ -24,6 +25,7 @@ def register_blueprints(app) -> None:
     api.register_blueprint(entries.bp, url_prefix="/entries")
     api.register_blueprint(categories.bp, url_prefix="/categories")
     api.register_blueprint(sources.bp, url_prefix="/sources")
+    api.register_blueprint(secrets.bp, url_prefix="/secrets")
     api.register_blueprint(analytics.bp, url_prefix="/analytics")
     api.register_blueprint(households.bp, url_prefix="/households")
     api.register_blueprint(aa_rules.bp, url_prefix="/aa-rules")

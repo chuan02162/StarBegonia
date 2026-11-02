@@ -18,23 +18,38 @@ def rules_for_household(household_id: int) -> list[ClassificationRule]:
     )
 
 
+def _match_texts(entry: Entry) -> dict[str, str]:
+    bill = entry.bill
+    merchant = (bill.merchant or "") if bill else ""
+    enriched = ""
+    if bill and bill.source_type == "commbank" and merchant and bill.household_id:
+        from app.services import abr as abr_service
+
+        enriched = abr_service.enrich_merchant(merchant, bill.household_id) or ""
+    return {
+        "name": (entry.name or "").casefold(),
+        "merchant": merchant.casefold(),
+        "business": enriched.casefold(),
+    }
+
+
 def best_match(
     entry: Entry, rules: list[ClassificationRule]
 ) -> ClassificationRule | None:
-    """Longest matching keyword wins, across each rule's match field."""
+    """Longest matching keyword wins, across the rule's match field plus the
+    ABR business name (when available)."""
+    texts = _match_texts(entry)
     best_rule: ClassificationRule | None = None
     best_len = 0
     for rule in rules:
         field = (rule.match_field or "name").strip().lower()
-        text = (
-            (entry.bill.merchant if entry.bill else "")
-            if field == "merchant"
-            else (entry.name or "")
-        )
-        normalized = (text or "").casefold()
+        field_text = texts["merchant"] if field == "merchant" else texts["name"]
+        candidates = [field_text]
+        if texts["business"]:
+            candidates.append(texts["business"])
         for keyword in rule.keywords or []:
             kw = str(keyword or "").strip().casefold()
-            if kw and kw in normalized and len(kw) > best_len:
+            if kw and any(kw in text for text in candidates) and len(kw) > best_len:
                 best_len = len(kw)
                 best_rule = rule
     return best_rule

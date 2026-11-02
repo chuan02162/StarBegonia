@@ -9,6 +9,8 @@ from sqlalchemy.orm import joinedload
 
 from app.extensions import db
 from app.models import Bill, Entry
+from app.services import abr as abr_service
+from app.services import secrets as secrets_service
 from app.services.categories import get_vocabulary
 from app.services.classification_rules import (
     apply_rule_matches,
@@ -36,6 +38,33 @@ REVIEW_CATEGORY = "review"
 _MAX_BATCH = 5000
 _JEV_BATCH_SIZE = 50
 _MAX_JEV_CONCURRENCY = 8
+
+
+def _jev_inputs(entry: Entry) -> tuple[str, str, str | None, str | None]:
+    """Resolve the values sent to Jev for an entry.
+
+    Returns ``(jev_name, persist_name, source_type, api_key)``.
+    For CommBank, ``jev_name`` is the ABR business name (joined) when it can be
+    resolved, otherwise the raw merchant. ``persist_name`` is the normalized
+    entry title that we may write back to the entry itself.
+    """
+    bill = entry.bill
+    persist = best_title(entry.name, bill.merchant if bill else None)
+    source_type = bill.source_type if bill else None
+    household_id = bill.household_id if bill else None
+    api_key = (
+        secrets_service.get_secret(household_id, "jev_api_key")
+        if household_id
+        else None
+    )
+    if bill and source_type == "commbank":
+        enriched = None
+        if household_id and bill.merchant:
+            enriched = abr_service.enrich_merchant(bill.merchant, household_id)
+        jev_name = enriched or bill.merchant or persist
+    else:
+        jev_name = persist
+    return jev_name, persist, source_type, api_key
 
 
 def _apply_jev_result(
@@ -89,11 +118,9 @@ def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
             db.session.commit()
             return entry
 
-    # The retired bank provider sometimes stored description="general" as entry.name; merchant
-    # holds the real title — send that to Jev or confidence stays junk.
-    label = best_title(entry.name, bill.merchant if bill else None)
-    if label != (entry.name or "").strip():
-        entry.name = label[:255]
+    jev_name, persist_name, source_type, api_key = _jev_inputs(entry)
+    if persist_name != (entry.name or "").strip():
+        entry.name = persist_name[:255]
 
     household_context = None
     if bill and bill.household_id:
@@ -104,13 +131,12 @@ def classify_entry(entry_id: int, *, force: bool = False) -> Entry:
 
     try:
         result = classify_entry_state(
-            name=label,
+            name=jev_name,
             amount=str(entry.amount),
-            merchant=bill.merchant if bill else None,
-            source_type=bill.source_type if bill else None,
-            note=entry.note or (bill.note if bill else None),
+            source_type=source_type,
             categories=categories,
             household_context=household_context or None,
+            api_key=api_key,
         )
     except JevError as exc:
         raise ClassifyError(exc.message, exc.status_code or 502) from exc
@@ -255,16 +281,16 @@ def classify_entries(
 def _classification_snapshot(entry: Entry, categories: list[dict[str, Any]]) -> dict[str, Any]:
     bill = entry.bill
     household = bill.household if bill else None
-    label = best_title(entry.name, bill.merchant if bill else None)
+    jev_name, persist_name, source_type, api_key = _jev_inputs(entry)
     return {
         "entry_id": entry.id,
-        "name": label,
+        "name": jev_name,
+        "persist_name": persist_name,
         "amount": str(entry.amount),
-        "merchant": bill.merchant if bill else None,
-        "source_type": bill.source_type if bill else None,
-        "note": entry.note or (bill.note if bill else None),
+        "source_type": source_type,
         "categories": categories,
         "household_context": (household.jev_context or "").strip() if household else None,
+        "api_key": api_key,
     }
 
 
@@ -273,11 +299,10 @@ def _classify_snapshot_in_app(app: Any, snapshot: dict[str, Any]) -> dict[str, A
         return classify_entry_state(
             name=snapshot["name"],
             amount=snapshot["amount"],
-            merchant=snapshot["merchant"],
             source_type=snapshot["source_type"],
-            note=snapshot["note"],
             categories=snapshot["categories"],
             household_context=snapshot["household_context"] or None,
+            api_key=snapshot["api_key"],
         )
 
 
@@ -328,8 +353,8 @@ async def _classify_entries_concurrently(
                 failed.append({"entry_id": entry.id, "error": message})
                 continue
 
-            if snapshot["name"] != entry.name:
-                entry.name = snapshot["name"][:255]
+            if snapshot["persist_name"] != entry.name:
+                entry.name = snapshot["persist_name"][:255]
             category_id = outcome.get("category_id")
             confidence = outcome.get("confidence")
             _apply_jev_result(

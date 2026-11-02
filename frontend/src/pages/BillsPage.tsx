@@ -306,7 +306,7 @@ export function BillsPage() {
                       </span>
                     )}
                     <p className="truncate text-lg text-ink-800">
-                      {b.merchant || "未命名商户"}
+                      {b.display_name || b.merchant || "未命名商户"}
                     </p>
                   </div>
                   <p className="text-sm text-ink-400">

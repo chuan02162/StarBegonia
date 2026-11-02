@@ -33,15 +33,14 @@ def classify_entry_state(
     *,
     name: str,
     amount: str | float | None,
-    merchant: str | None,
     source_type: str | None,
-    note: str | None,
     categories: list[dict[str, str]],
     household_context: str | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     """Call Jev once for category choice. Returns parsed result."""
-    api_key = current_app.config.get("JEV_API_KEY") or ""
-    if not api_key:
+    effective_key = api_key or current_app.config.get("JEV_API_KEY") or ""
+    if not effective_key:
         raise JevError("JEV_API_KEY is not configured", 503)
 
     criteria = {
@@ -69,19 +68,16 @@ def classify_entry_state(
     state: dict[str, Any] = {
         "name": name,
         "amount": amount,
-        "merchant": merchant,
         "source_type": source_type,
-        "note": note,
     }
     if ctx:
         state["household_context"] = ctx
-    raw = _post_systemone(state=state, questions=questions)
+    raw = _post_systemone(state=state, questions=questions, api_key=effective_key)
     return _parse_answers(raw)
 
 
-def _post_systemone(*, state: Any, questions: dict[str, Any]) -> dict[str, Any]:
+def _post_systemone(*, state: Any, questions: dict[str, Any], api_key: str) -> dict[str, Any]:
     url = current_app.config["JEV_API_URL"]
-    api_key = current_app.config["JEV_API_KEY"]
     model = current_app.config.get("JEV_MODEL") or "jev-latest"
     body = json.dumps(
         {"state": state, "model": model, "questions": questions}

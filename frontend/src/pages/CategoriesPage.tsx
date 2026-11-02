@@ -311,7 +311,7 @@ function PendingRow({
                     to={`/bills/${entry.bill.id}`}
                     className="text-ink-600 hover:text-ink-800"
                   >
-                    {entry.bill.merchant || "账单"}
+                    {entry.bill.display_name || entry.bill.merchant || "账单"}
                   </Link>
                   {" · "}
                   {formatOccurredAt(entry.bill.occurred_at)}

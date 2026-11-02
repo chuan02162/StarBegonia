@@ -11,6 +11,7 @@ from app.jobs.classify_job import run_classify_batch
 from app.jobs.progress import job_progress_payload
 from app.jobs.queues import default_queue
 from app.models import ClassificationRule
+from app.services import abr as abr_service
 from app.services import classify as classify_service
 from app.services import dedup as dedup_service
 from app.services import households as household_service
@@ -248,6 +249,8 @@ def pending_entries():
                     "occurred_at": b.occurred_at.isoformat() + "Z",
                     "currency": b.currency,
                     "person_id": b.person_id,
+                    "household_id": b.household_id,
+                    "display_name": b.merchant,
                     "account": acct,
                     "account_person_id": acct_person,
                 },
@@ -279,6 +282,20 @@ def pending_entries():
 
     total = len(items)
     page = items[max(offset, 0) : max(offset, 0) + min(max(limit, 1), 200)]
+    for it in page:
+        bill = it.get("bill")
+        if (
+            bill
+            and bill.get("source_type") == "commbank"
+            and bill.get("merchant")
+            and bill.get("household_id")
+        ):
+            bill["display_name"] = (
+                abr_service.enrich_merchant(
+                    bill["merchant"], bill["household_id"]
+                )
+                or bill["merchant"]
+            )
     return jsonify(
         {
             "entries": page,

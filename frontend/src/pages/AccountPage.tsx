@@ -38,7 +38,7 @@ export function AccountPage() {
   const [jevContextMsg, setJevContextMsg] = useState("");
   const [jevProgress, setJevProgress] = useState<JobProgress | null>(null);
   const [tab, setTab] = useState<
-    "personal" | "categories" | "sources" | "family"
+    "personal" | "categories" | "sources" | "family" | "keys"
   >("personal");
 
   const sourceStatus = useSourceStatus();
@@ -327,6 +327,7 @@ export function AccountPage() {
             ["categories", "分类"],
             ["sources", "数据源"],
             ["family", "家庭"],
+            ["keys", "密钥管理"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -703,6 +704,153 @@ export function AccountPage() {
         </ul>
       </section>
       )}
+
+      {tab === "keys" && <KeysSection />}
     </div>
+  );
+}
+
+type SecretState = {
+  configured: boolean;
+  masked: string | null;
+};
+
+function KeysSection() {
+  const [secrets, setSecrets] = useState<Record<string, SecretState>>({});
+  const [abrGuid, setAbrGuid] = useState("");
+  const [jevKey, setJevKey] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState<"abr" | "jev" | "validate" | null>(null);
+
+  const load = useCallback(async () => {
+    const data = await api<{ secrets: Record<string, SecretState> }>(
+      "/api/v1/secrets",
+    );
+    setSecrets(data.secrets || {});
+  }, []);
+
+  useEffect(() => {
+    load().catch((err) =>
+      setError(err instanceof ApiError ? err.message : "加载密钥失败"),
+    );
+  }, [load]);
+
+  async function save(key: string, value: string) {
+    setBusy(key === "abr_guid" ? "abr" : "jev");
+    setError("");
+    setMessage("");
+    try {
+      await api("/api/v1/secrets", {
+        method: "PUT",
+        body: JSON.stringify({ key, value }),
+      });
+      setMessage("已保存");
+      if (key === "abr_guid") setAbrGuid("");
+      else setJevKey("");
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "保存失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function validateAbr() {
+    setBusy("validate");
+    setError("");
+    setMessage("");
+    try {
+      const res = await api<{ ok: boolean; names?: number; error?: string }>(
+        "/api/v1/secrets/abr/validate",
+        {
+          method: "POST",
+          body: JSON.stringify({ guid: abrGuid || undefined }),
+        },
+      );
+      if (res.ok) {
+        setMessage(`ABR GUID 有效（测试搜索返回 ${res.names ?? 0} 条匹配）`);
+      } else {
+        setError(res.error || "校验失败");
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "校验失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="max-w-md space-y-5">
+      <div>
+        <h2 className="font-display text-xl text-ink-800">密钥管理</h2>
+        <p className="mt-1 text-sm text-ink-500">
+          家庭共享的 API 密钥；保存后加密存储，界面只显示末几位
+        </p>
+      </div>
+
+      <div className="space-y-3 rounded-lg bg-ink-50/80 p-4 ring-1 ring-ink-100">
+        <label className="block">
+          <span className="mb-1.5 block text-sm text-ink-600">ABR GUID</span>
+          <input
+            className="field"
+            type="password"
+            value={abrGuid}
+            onChange={(e) => setAbrGuid(e.target.value)}
+            placeholder={
+              secrets.abr_guid?.configured
+                ? `已配置（${secrets.abr_guid.masked}）`
+                : "用于 ABN Lookup 商户名富化"
+            }
+          />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-primary text-sm"
+            disabled={busy !== null || !abrGuid.trim()}
+            onClick={() => save("abr_guid", abrGuid)}
+          >
+            {busy === "abr" ? "保存中…" : "保存"}
+          </button>
+          <button
+            type="button"
+            className="btn-ghost text-sm"
+            disabled={busy !== null}
+            onClick={validateAbr}
+          >
+            {busy === "validate" ? "校验中…" : "校验"}
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-3 rounded-lg bg-ink-50/80 p-4 ring-1 ring-ink-100">
+        <label className="block">
+          <span className="mb-1.5 block text-sm text-ink-600">Jev API Key</span>
+          <input
+            className="field"
+            type="password"
+            value={jevKey}
+            onChange={(e) => setJevKey(e.target.value)}
+            placeholder={
+              secrets.jev_api_key?.configured
+                ? `已配置（${secrets.jev_api_key.masked}）`
+                : "留空则使用服务器全局配置的 key"
+            }
+          />
+        </label>
+        <button
+          type="button"
+          className="btn-primary text-sm"
+          disabled={busy !== null || !jevKey.trim()}
+          onClick={() => save("jev_api_key", jevKey)}
+        >
+          {busy === "jev" ? "保存中…" : "保存"}
+        </button>
+      </div>
+
+      {message && <p className="text-sm text-ink-600">{message}</p>}
+      {error && <p className="text-sm text-red-700">{error}</p>}
+    </section>
   );
 }

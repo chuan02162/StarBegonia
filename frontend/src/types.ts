@@ -52,6 +52,7 @@ export type Bill = {
   note: string | null;
   account?: string | null;
   account_person_id?: number | null;
+  display_name?: string | null;
   total_amount: string;
   dedup_status?: DedupStatus | string;
   dedup_primary_id?: number | null;
@@ -231,6 +232,8 @@ export type PendingEntry = Entry & {
     person_id?: number | null;
     account?: string | null;
     account_person_id?: number | null;
+    display_name?: string | null;
+    household_id?: number | null;
   } | null;
 };
 
